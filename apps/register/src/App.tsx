@@ -134,7 +134,7 @@ export default function App() {
     <aside className="sidebar">
       <a className="brand" href="#" onClick={event => { event.preventDefault(); setPage('register'); }} aria-label="GRAM register"><span className="brand-mark">g<span>•</span></span><span className="brand-name">GRAM<span>POINT OF SALE</span></span></a>
       <div className="workspace-label">YOUR WORKSPACE</div>
-      <nav aria-label="Main navigation">{([['register', 'register', 'Register'], ['history', 'history', 'Sales history'], ['cash', 'cash', 'Cash sessions'], ['settings', 'settings', 'Configuration']] as const).map(([id, icon, text]) => <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => setPage(id)}><Icon name={icon}/><span>{text}</span>{page === id && <span className="active-dot"/>}</button>)}</nav>
+      <nav aria-label="Main navigation">{([['register', 'register', 'Register'], ['history', 'history', 'Sales history'], ['cash', 'cash', 'Cash sessions'], ['settings', 'settings', 'Configuration']] as const).map(([id, icon, text]) => <button key={id} aria-label={text} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => setPage(id)}><Icon name={icon}/><span>{text}</span>{page === id && <span className="active-dot"/>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="local-note"><span className={`status-dot ${bootError ? 'offline' : ''}`}/><div><strong>{bootError ? 'Service unavailable' : 'Local-first register'}</strong><span>Your data stays on this device</span></div></div><div className="station"><span className="station-avatar">01</span><div><strong>Register 01</strong><span>Demo workspace</span></div><Icon name="lock" size={15}/></div></div>
     </aside>
     <main className="main-content">
