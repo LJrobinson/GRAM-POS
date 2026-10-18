@@ -9,3 +9,16 @@
 
 /* Catalog administration keeps exact inputs readable on desktop and touch screens. */
 .editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0}.editor-grid label{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:600;min-width:0}.editor-grid input,.editor-grid select{width:100%;min-width:0;min-height:44px;border:1px solid #dce3d5;border-radius:8px;padding:10px;background:#fff;color:#263a2b;font:inherit}.settings-section-heading,.configuration-actions{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:20px 0}.settings-section-heading h2,.export-panel h2{font-size:21px}.configuration-actions{justify-content:flex-start}.configuration-actions>span{font-size:12px;color:#626c60}.product-editor summary{cursor:pointer;font-size:16px;font-weight:600;overflow-wrap:anywhere}.archived-product{border-style:dashed;background:#f2f4ef}.product-editor>.text-button{margin-left:15px}.export-panel p,.blank-setup p{font-size:12px;line-height:1.7;color:#626c60}.blank-setup{margin-top:25px;max-width:470px}.blank-setup summary{cursor:pointer;font-size:13px;font-weight:600}.settings-card .text-button{min-height:40px}.catalog-editor>.input-help{margin-bottom:20px}.export-panel{margin-top:32px}.settings-card-title p{overflow-wrap:anywhere}.settings-fields{min-width:0}.settings-page .page-heading{gap:20px}@media(max-width:740px){.editor-grid{grid-template-columns:1fr;gap:12px}.configuration-actions{align-items:stretch}.configuration-actions button{white-space:normal}.settings-section-heading h2{font-size:20px}.product-editor summary{font-size:14px}.settings-page .primary{white-space:normal}}
+
+/* Drawer records retain the same large, touch-first controls as checkout. */
+.drawer-status { display:flex; align-items:center; justify-content:space-between; gap:12px; background:#eaf2ed; border:1px solid #cfe0d4; border-radius:12px; padding:12px 16px; margin-bottom:18px; font-size:13px; }
+.ledger-totals { display:grid; gap:12px; margin:24px 0; }
+.ledger-totals > div { display:flex; justify-content:space-between; gap:20px; }
+.ledger-totals dd { margin:0; font-weight:700; text-align:right; }
+.ledger-form > .full-width { margin-top:12px; min-height:48px; }
+.ledger-form > input { width:100%; min-height:48px; border:1px solid #ccd5d0; border-radius:8px; padding:12px; font:inherit; }
+.closing-variance { font-weight:700; font-size:20px; }
+.refund-status { margin-top:20px; }
+.refund-status p { font-size:12px; color:#66756b; }
+.settings-card summary { cursor:pointer; min-height:48px; line-height:1.6; overflow-wrap:anywhere; }
+@media(max-width:600px) { .drawer-status { align-items:stretch; flex-direction:column; } .ledger-totals > div { gap:10px; } }

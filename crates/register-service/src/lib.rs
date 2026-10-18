@@ -19,7 +19,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const APPLICATION_ID: i64 = 0x4752414D;
 const MAX_LINES: usize = 500;
 
@@ -126,9 +126,37 @@ impl RegisterService {
                 "This database is not a recognized GRAM register file.",
             ));
         }
+        if version < 2 {
+            transaction.execute_batch(
+                "CREATE TABLE ledger_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), legacy_sale_max_id INTEGER NOT NULL CHECK(legacy_sale_max_id>=0));
+                 INSERT INTO ledger_metadata VALUES(1,(SELECT COALESCE(MAX(id),0) FROM sales));
+                 CREATE TABLE cash_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, idempotency_key TEXT NOT NULL UNIQUE, request_json TEXT NOT NULL, session_json TEXT NOT NULL);
+                 CREATE TABLE cash_closes (session_id INTEGER PRIMARY KEY REFERENCES cash_sessions(id), request_json TEXT NOT NULL, session_json TEXT NOT NULL);
+                 CREATE TABLE sale_sessions (sale_id INTEGER PRIMARY KEY REFERENCES sales(id), session_id INTEGER NOT NULL REFERENCES cash_sessions(id));
+                 CREATE TABLE refunds (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id), session_id INTEGER NOT NULL REFERENCES cash_sessions(id), idempotency_key TEXT NOT NULL UNIQUE, request_json TEXT NOT NULL, receipt_json TEXT NOT NULL);
+                 PRAGMA user_version = 2;"
+            )?;
+            for table in [
+                "cash_sessions",
+                "cash_closes",
+                "sale_sessions",
+                "refunds",
+                "ledger_metadata",
+            ] {
+                transaction.execute_batch(&format!("CREATE TRIGGER {table}_no_update BEFORE UPDATE ON {table} BEGIN SELECT RAISE(ABORT, 'Ledger is immutable'); END; CREATE TRIGGER {table}_no_delete BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'Ledger is immutable'); END;"))?;
+            }
+        }
         // Read required columns before accepting the file; corrupted/missing schema fails closed.
         transaction.prepare("SELECT s.revision, s.config_json, d.draft_json FROM settings s LEFT JOIN drafts d ON d.singleton=s.singleton")?;
         transaction.prepare("SELECT s.id, s.idempotency_key, s.request_json, s.created_at_unix, s.snapshot_json, r.receipt_json FROM sales s LEFT JOIN receipts r ON s.id=r.sale_id")?;
+        transaction.prepare("SELECT singleton,legacy_sale_max_id FROM ledger_metadata")?;
+        transaction
+            .prepare("SELECT id,idempotency_key,request_json,session_json FROM cash_sessions")?;
+        transaction.prepare("SELECT session_id,request_json,session_json FROM cash_closes")?;
+        transaction.prepare("SELECT sale_id,session_id FROM sale_sessions")?;
+        transaction.prepare(
+            "SELECT id,sale_id,session_id,idempotency_key,request_json,receipt_json FROM refunds",
+        )?;
         transaction.commit()?;
         Ok(Self { conn })
     }
@@ -136,6 +164,27 @@ impl RegisterService {
     /// JSON command boundary shared by desktop IPC and the opt-in development server.
     pub fn handle(&mut self, command: &str, payload: Value) -> Result<Value, ServiceError> {
         match command {
+            "get_cash_ledger" => {
+                let _: EmptyInput = decode(payload)?;
+                encode(self.cash_ledger()?)
+            }
+            "open_cash_session" => {
+                let input = decode(payload)?;
+                encode(self.open_cash_session(input)?)
+            }
+            "close_cash_session" => {
+                let input = decode(payload)?;
+                encode(self.close_cash_session(input)?)
+            }
+            "refund_cash_sale" => {
+                let input = decode(payload)?;
+                encode(self.refund_cash_sale(input)?)
+            }
+            "get_refund_by_key" => {
+                let input: KeyInput = decode(payload)?;
+                validate_id(&input.idempotency_key, "Refund key")?;
+                Ok(json!({"refund":self.refund_by_key(&input.idempotency_key)?}))
+            }
             "get_state" => {
                 let _: EmptyInput = decode(payload)?;
                 encode(self.state()?)
@@ -284,6 +333,14 @@ impl RegisterService {
         if expected.is_some_and(|value| value != previous.unwrap_or(0) as u64) {
             return Err(ServiceError::new("STALE_CONFIG", "Configuration changed in another window. Reload before editing; your changes were not saved."));
         }
+        if let Some(active) = active_session(&tx)? {
+            if active.currency != config.currency {
+                return Err(ServiceError::new(
+                    "SESSION_CURRENCY",
+                    "Close the active cash session before changing currency or precision.",
+                ));
+            }
+        }
         let revision = previous.unwrap_or(0).checked_add(1).ok_or_else(|| {
             ServiceError::new("INVALID_CONFIG", "Configuration revision limit reached.")
         })?;
@@ -319,6 +376,17 @@ impl RegisterService {
             }
             return decode_stored(&receipt);
         }
+        let session = active_session(&tx)?.ok_or_else(|| {
+            ServiceError::new(
+                "NO_OPEN_SESSION",
+                "Open a cash session before collecting cash.",
+            )
+        })?;
+        check_session(
+            &session,
+            input.expected_session_id.as_deref(),
+            input.expected_currency.as_ref(),
+        )?;
         let tender = parse_integer(&input.tender_minor, "Cash tender")?;
         let expected_total = parse_integer(&input.expected_total_minor, "Expected total")?;
         let expected_revision = parse_integer(
@@ -367,6 +435,16 @@ impl RegisterService {
         tx.execute(
             "INSERT INTO receipts(sale_id,receipt_json) VALUES(?1,?2)",
             params![id, serialize(&receipt)?],
+        )?;
+        if receipt.quote.currency != session.currency {
+            return Err(ServiceError::new(
+                "SESSION_CURRENCY",
+                "Sale currency differs from the active session.",
+            ));
+        }
+        tx.execute(
+            "INSERT INTO sale_sessions VALUES(?1,?2)",
+            params![id, session.session_id],
         )?;
         // Clearing the recovered cart is part of the same commit as the receipt.
         tx.execute("DELETE FROM drafts WHERE singleton=1", [])?;
@@ -906,5 +984,353 @@ pub fn demo_config() -> Config {
                 },
             },
         ],
+    }
+}
+
+fn now_unix() -> Result<String, ServiceError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|t| t.as_secs().to_string())
+        .map_err(|_| ServiceError::new("CLOCK_ERROR", "The clock is before the Unix epoch."))
+}
+fn check_session(
+    session: &CashSession,
+    expected: Option<&str>,
+    currency: Option<&CurrencyDto>,
+) -> Result<(), ServiceError> {
+    if expected.is_some_and(|id| id != session.session_id) {
+        return Err(ServiceError::new(
+            "SESSION_CHANGED",
+            "The cash session changed. Review the active drawer before trying again.",
+        ));
+    }
+    if currency.is_some_and(|c| c != &session.currency) {
+        return Err(ServiceError::new(
+            "SESSION_CURRENCY",
+            "Currency or precision changed. Review the active drawer before trying again.",
+        ));
+    }
+    Ok(())
+}
+fn active_session(conn: &Connection) -> Result<Option<CashSession>, ServiceError> {
+    let mut stmt = conn.prepare("SELECT s.session_json FROM cash_sessions s LEFT JOIN cash_closes c ON c.session_id=s.id WHERE c.session_id IS NULL ORDER BY s.id")?;
+    let values = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if values.len() > 1 {
+        return Err(ServiceError::new(
+            "STORAGE_ERROR",
+            "Multiple active cash sessions found.",
+        ));
+    }
+    values.first().map(|raw| decode_stored(raw)).transpose()
+}
+fn session_totals(
+    conn: &Connection,
+    mut session: CashSession,
+) -> Result<CashSession, ServiceError> {
+    let mut sales: u128 = 0;
+    let mut refunds: u128 = 0;
+    let mut count: u64 = 0;
+    let mut stmt = conn.prepare("SELECT r.receipt_json FROM sale_sessions m JOIN receipts r ON r.sale_id=m.sale_id WHERE m.session_id=?1")?;
+    for row in stmt.query_map([&session.session_id], |r| r.get::<_, String>(0))? {
+        let receipt: Receipt = decode_stored(&row?)?;
+        sales += u128::from(parse_integer(&receipt.quote.total_minor, "Sale total")?);
+        count += 1;
+    }
+    let mut stmt = conn.prepare("SELECT receipt_json FROM refunds WHERE session_id=?1")?;
+    for row in stmt.query_map([&session.session_id], |r| r.get::<_, String>(0))? {
+        let receipt: RefundReceipt = decode_stored(&row?)?;
+        refunds += u128::from(parse_integer(&receipt.amount_minor, "Refund total")?);
+        count += 1;
+    }
+    let opening = i128::from(parse_integer(
+        &session.opening_float_minor,
+        "Opening float",
+    )?);
+    let sales = i128::try_from(sales)
+        .map_err(|_| ServiceError::new("STORAGE_ERROR", "Cash total overflow."))?;
+    let refunds = i128::try_from(refunds)
+        .map_err(|_| ServiceError::new("STORAGE_ERROR", "Cash total overflow."))?;
+    session.sales_total_minor = sales.to_string();
+    session.refunds_total_minor = refunds.to_string();
+    session.expected_cash_minor = (opening + sales - refunds).to_string();
+    session.movement_count = count.to_string();
+    Ok(session)
+}
+impl RegisterService {
+    pub fn open_cash_session(
+        &mut self,
+        input: OpenCashSessionInput,
+    ) -> Result<CashSession, ServiceError> {
+        validate_id(&input.idempotency_key, "Session key")?;
+        let raw = serialize(&input)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                "SELECT request_json,session_json FROM cash_sessions WHERE idempotency_key=?1",
+                [&input.idempotency_key],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((request, session)) = existing {
+            if request != raw {
+                return Err(ServiceError::new(
+                    "IDEMPOTENCY_CONFLICT",
+                    "Session key already used for another opening.",
+                ));
+            }
+            let original: CashSession = decode_stored(&session)?;
+            let closed: Option<String> = tx
+                .query_row(
+                    "SELECT session_json FROM cash_closes WHERE session_id=?1",
+                    [&original.session_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            return match closed {
+                Some(raw) => decode_stored(&raw),
+                None => session_totals(&tx, original),
+            };
+        }
+        if active_session(&tx)?.is_some() {
+            return Err(ServiceError::new(
+                "SESSION_ALREADY_OPEN",
+                "Close the existing cash session first.",
+            ));
+        }
+        let (_, config) = read_config(&tx)?;
+        if input
+            .expected_currency
+            .as_ref()
+            .is_some_and(|c| c != &config.currency)
+        {
+            return Err(ServiceError::new(
+                "SESSION_CURRENCY",
+                "Currency or precision changed. Review before opening.",
+            ));
+        }
+        let opening = parse_integer(&input.opening_float_minor, "Opening float")?;
+        // Determine the AUTOINCREMENT ID inside the serialized write transaction.
+        let id: i64 = tx.query_row(
+            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='cash_sessions'),0)+1",
+            [],
+            |r| r.get(0),
+        )?;
+        let session = CashSession {
+            session_id: id.to_string(),
+            opened_at_unix: now_unix()?,
+            currency: config.currency,
+            opening_float_minor: opening.to_string(),
+            sales_total_minor: "0".into(),
+            refunds_total_minor: "0".into(),
+            expected_cash_minor: opening.to_string(),
+            movement_count: "0".into(),
+            closed_at_unix: None,
+            counted_minor: None,
+            variance_minor: None,
+        };
+        tx.execute("INSERT INTO cash_sessions(id,idempotency_key,request_json,session_json) VALUES(?1,?2,?3,?4)", params![id,input.idempotency_key,raw,serialize(&session)?])?;
+        tx.commit()?;
+        Ok(session)
+    }
+    pub fn close_cash_session(
+        &mut self,
+        input: CloseCashSessionInput,
+    ) -> Result<CashSession, ServiceError> {
+        let id = parse_integer(&input.session_id, "Session ID")?;
+        let counted = parse_integer(&input.counted_minor, "Counted cash")?;
+        let expected_count = parse_integer(&input.expected_movement_count, "Movement count")?;
+        let raw = serialize(&input)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                "SELECT request_json,session_json FROM cash_closes WHERE session_id=?1",
+                [id.to_string()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((request, session)) = existing {
+            if request != raw {
+                return Err(ServiceError::new(
+                    "SESSION_CLOSED",
+                    "This cash session is already closed and cannot be edited.",
+                ));
+            }
+            return decode_stored(&session);
+        }
+        let active = active_session(&tx)?
+            .ok_or_else(|| ServiceError::new("NO_OPEN_SESSION", "No cash session is open."))?;
+        check_session(&active, Some(&input.session_id), None)?;
+        let mut session = session_totals(&tx, active)?;
+        if parse_integer(&session.movement_count, "Movement count")? != expected_count {
+            return Err(ServiceError::new(
+                "STALE_SESSION",
+                "Cash movements changed. Refresh and recount before closing.",
+            ));
+        }
+        let expected: i128 = session
+            .expected_cash_minor
+            .parse()
+            .map_err(|_| ServiceError::new("STORAGE_ERROR", "Invalid expected cash."))?;
+        session.closed_at_unix = Some(now_unix()?);
+        session.counted_minor = Some(counted.to_string());
+        session.variance_minor = Some((i128::from(counted) - expected).to_string());
+        tx.execute(
+            "INSERT INTO cash_closes VALUES(?1,?2,?3)",
+            params![id.to_string(), raw, serialize(&session)?],
+        )?;
+        tx.commit()?;
+        Ok(session)
+    }
+    pub fn refund_by_key(&self, key: &str) -> Result<Option<RefundReceipt>, ServiceError> {
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT receipt_json FROM refunds WHERE idempotency_key=?1",
+                [key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        raw.map(|v| decode_stored(&v)).transpose()
+    }
+    pub fn refund_cash_sale(&mut self, input: RefundInput) -> Result<RefundReceipt, ServiceError> {
+        validate_id(&input.idempotency_key, "Refund key")?;
+        let raw = serialize(&input)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                "SELECT request_json,receipt_json FROM refunds WHERE idempotency_key=?1",
+                [&input.idempotency_key],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((request, receipt)) = existing {
+            if request != raw {
+                return Err(ServiceError::new(
+                    "IDEMPOTENCY_CONFLICT",
+                    "Refund key already used for another request.",
+                ));
+            }
+            return decode_stored(&receipt);
+        }
+        if input.reason.trim().is_empty()
+            || input.reason.len() > 500
+            || input.reason.chars().any(char::is_control)
+        {
+            return Err(ServiceError::new(
+                "INVALID_INPUT",
+                "Refund reason must contain 1–500 characters without controls.",
+            ));
+        }
+        let sale_id = parse_integer(&input.sale_id, "Sale ID")?;
+        let prior: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM refunds WHERE sale_id=?1)",
+            [sale_id.to_string()],
+            |r| r.get(0),
+        )?;
+        if prior {
+            return Err(ServiceError::new(
+                "ALREADY_REFUNDED",
+                "This sale has already been refunded in full.",
+            ));
+        }
+        let receipt: Option<String> = tx
+            .query_row(
+                "SELECT receipt_json FROM receipts WHERE sale_id=?1",
+                [sale_id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let original: Receipt = decode_stored(
+            &receipt.ok_or_else(|| ServiceError::new("NOT_FOUND", "No original receipt found."))?,
+        )?;
+        let session = active_session(&tx)?.ok_or_else(|| {
+            ServiceError::new(
+                "NO_OPEN_SESSION",
+                "Open a cash session before issuing a refund.",
+            )
+        })?;
+        check_session(
+            &session,
+            input.expected_session_id.as_deref(),
+            input.expected_currency.as_ref(),
+        )?;
+        if original.quote.currency != session.currency {
+            return Err(ServiceError::new("SESSION_CURRENCY","Original sale currency or precision differs from the active drawer. No conversion is supported."));
+        }
+        let id: i64 = tx.query_row(
+            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='refunds'),0)+1",
+            [],
+            |r| r.get(0),
+        )?;
+        let refund = RefundReceipt {
+            refund_id: id.to_string(),
+            refund_number: format!("DEMO-REFUND-{id:08}"),
+            created_at_unix: now_unix()?,
+            sale_id: original.sale_id,
+            original_receipt_number: original.receipt_number,
+            session_id: session.session_id,
+            reason: input.reason,
+            amount_minor: original.quote.total_minor,
+            currency: original.quote.currency,
+            payment_method: "cash".into(),
+        };
+        tx.execute("INSERT INTO refunds(id,sale_id,session_id,idempotency_key,request_json,receipt_json) VALUES(?1,?2,?3,?4,?5,?6)",params![id,refund.sale_id,refund.session_id,input.idempotency_key,raw,serialize(&refund)?])?;
+        tx.commit()?;
+        Ok(refund)
+    }
+    pub fn cash_ledger(&self) -> Result<CashLedger, ServiceError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut sessions = Vec::new();
+        {
+            let mut stmt = tx.prepare("SELECT s.session_json,c.session_json FROM cash_sessions s LEFT JOIN cash_closes c ON c.session_id=s.id ORDER BY s.id DESC")?;
+            for row in stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            })? {
+                let (opened, closed) = row?;
+                sessions.push(match closed {
+                    Some(raw) => decode_stored(&raw)?,
+                    None => session_totals(&tx, decode_stored(&opened)?)?,
+                });
+            }
+        }
+        let mut refunds = Vec::new();
+        {
+            let mut stmt = tx.prepare("SELECT receipt_json FROM refunds ORDER BY id DESC")?;
+            for row in stmt.query_map([], |r| r.get::<_, String>(0))? {
+                refunds.push(decode_stored(&row?)?);
+            }
+        }
+        let sale_sessions = {
+            let mut stmt =
+                tx.prepare("SELECT sale_id,session_id FROM sale_sessions ORDER BY sale_id")?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(SaleSession {
+                        sale_id: r.get::<_, i64>(0)?.to_string(),
+                        session_id: r.get::<_, i64>(1)?.to_string(),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        let active_session = sessions
+            .iter()
+            .find(|s| s.closed_at_unix.is_none())
+            .cloned();
+        tx.commit()?;
+        Ok(CashLedger {
+            active_session,
+            sessions,
+            refunds,
+            sale_sessions,
+        })
     }
 }

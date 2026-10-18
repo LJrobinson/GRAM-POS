@@ -55,6 +55,8 @@ fn cart() -> Vec<CartInputLine> {
 fn checkout(service: &RegisterService, key: &str) -> CheckoutInput {
     let quote = service.quote(&cart()).unwrap();
     CheckoutInput {
+        expected_session_id: None,
+        expected_currency: None,
         idempotency_key: key.into(),
         lines: cart(),
         tender_minor: "15000".into(),
@@ -84,6 +86,12 @@ fn sale_receipt_and_draft_reopen_without_precision_loss() {
     let db = TestDb::new();
     let mut service = db.open();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     service.save_draft(CartInput { lines: cart() }).unwrap();
     drop(service);
     let mut service = db.open();
@@ -115,6 +123,12 @@ fn duplicate_checkout_returns_original_even_after_configuration_change() {
     let db = TestDb::new();
     let mut service = db.open();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let request = checkout(&service, "idempotent-key");
     let receipt = service.complete_cash_sale(request.clone()).unwrap();
     let mut config = demo_config();
@@ -144,6 +158,12 @@ fn insufficient_and_malformed_tender_write_nothing() {
     let db = TestDb::new();
     let mut service = db.open();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     service.save_draft(CartInput { lines: cart() }).unwrap();
     for invalid in [
         "12499",
@@ -176,6 +196,12 @@ fn stale_total_and_config_revision_cannot_silently_complete() {
     let db = TestDb::new();
     let mut service = db.open();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let mut request = checkout(&service, "stale-total");
     request.expected_total_minor = "1".into();
     assert_eq!(
@@ -195,6 +221,12 @@ fn receipt_insert_failure_rolls_back_sale_and_draft_deletion() {
     let db = TestDb::new();
     let mut service = db.open();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     service.save_draft(CartInput { lines: cart() }).unwrap();
     let raw = Connection::open(&db.0).unwrap();
     raw.execute_batch("CREATE TRIGGER injected_failure BEFORE INSERT ON receipts BEGIN SELECT RAISE(ABORT,'injected write failure'); END;").unwrap();
@@ -226,6 +258,12 @@ fn saved_sale_and_receipt_rows_reject_updates_and_deletes() {
     let db = TestDb::new();
     let mut service = db.open();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let receipt = service
         .complete_cash_sale(checkout(&service, "immutable"))
         .unwrap();
@@ -304,6 +342,12 @@ fn invalid_configuration_does_not_replace_last_good_revision() {
 fn pricing_policy_edits_flow_through_core_and_receipt_stays_frozen() {
     let mut service = RegisterService::in_memory().unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let lines = vec![CartInputLine {
         id: "overage".into(),
         sku: "bulk-a".into(),
@@ -321,6 +365,8 @@ fn pricing_policy_edits_flow_through_core_and_receipt_stays_frozen() {
     assert_eq!(after.groups[0].billable_grams, "3.510");
     let receipt = service
         .complete_cash_sale(CheckoutInput {
+            expected_session_id: None,
+            expected_currency: None,
             idempotency_key: "policy".into(),
             lines,
             tender_minor: "4000".into(),
@@ -335,6 +381,12 @@ fn pricing_policy_edits_flow_through_core_and_receipt_stays_frozen() {
 fn pooled_packages_remain_declared_content_not_actual_measurement() {
     let mut service = RegisterService::in_memory().unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let lines = vec![
         CartInputLine {
             id: "measured".into(),
@@ -368,6 +420,12 @@ fn duplicate_connection_checkout_cannot_duplicate_cash_sale() {
     let db = TestDb::new();
     let mut service = db.open();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let request = checkout(&service, "concurrent-key");
     let mut other = db.open();
     let cloned = request.clone();
@@ -391,8 +449,16 @@ fn large_minor_units_stay_exact_strings_at_json_boundary() {
     }];
     let quote = service.quote(&lines).unwrap();
     assert_eq!(quote.total_minor, "9007199254740993");
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let receipt = service
         .complete_cash_sale(CheckoutInput {
+            expected_session_id: None,
+            expected_currency: None,
             idempotency_key: "exact-u64".into(),
             lines,
             tender_minor: "18446744073709551615".into(),
@@ -408,6 +474,12 @@ fn large_minor_units_stay_exact_strings_at_json_boundary() {
 fn malformed_cart_and_unknown_command_are_rejected() {
     let mut service = RegisterService::in_memory().unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     assert!(service
         .handle("quote_cart", json!({"lines":[],"total_minor":"0"}))
         .is_err());
@@ -454,6 +526,12 @@ fn empty_catalog_can_be_built_and_archived_without_demo_seed() {
         },
     });
     let saved = service.put_config_checked(config.clone(), "1").unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let lines = vec![CartInputLine {
         id: "one".into(),
         sku: "my-pack".into(),
@@ -461,6 +539,8 @@ fn empty_catalog_can_be_built_and_archived_without_demo_seed() {
     }];
     let quote = service.quote(&lines).unwrap();
     let request = CheckoutInput {
+        expected_session_id: None,
+        expected_currency: None,
         idempotency_key: "custom-sale".into(),
         lines: lines.clone(),
         tender_minor: quote.total_minor.clone(),

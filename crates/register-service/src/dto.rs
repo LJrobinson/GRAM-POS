@@ -81,6 +81,10 @@ pub struct CartInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CheckoutInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_currency: Option<CurrencyDto>,
     pub idempotency_key: String,
     pub lines: Vec<CartInputLine>,
     pub tender_minor: String,
@@ -178,4 +182,74 @@ pub struct State {
     pub config: Option<Config>,
     pub catalog: Vec<CatalogItem>,
     pub draft: CartInput,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenCashSessionInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_currency: Option<CurrencyDto>,
+    pub idempotency_key: String,
+    pub opening_float_minor: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloseCashSessionInput {
+    pub session_id: String,
+    pub counted_minor: String,
+    pub expected_movement_count: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefundInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_currency: Option<CurrencyDto>,
+    pub idempotency_key: String,
+    pub sale_id: String,
+    pub reason: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefundReceipt {
+    pub refund_id: String,
+    pub refund_number: String,
+    pub created_at_unix: String,
+    pub sale_id: String,
+    pub original_receipt_number: String,
+    pub session_id: String,
+    pub reason: String,
+    pub amount_minor: String,
+    pub currency: CurrencyDto,
+    pub payment_method: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CashSession {
+    pub session_id: String,
+    pub opened_at_unix: String,
+    pub currency: CurrencyDto,
+    pub opening_float_minor: String,
+    pub sales_total_minor: String,
+    pub refunds_total_minor: String,
+    pub expected_cash_minor: String,
+    pub movement_count: String,
+    pub closed_at_unix: Option<String>,
+    pub counted_minor: Option<String>,
+    pub variance_minor: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaleSession {
+    pub sale_id: String,
+    pub session_id: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CashLedger {
+    pub active_session: Option<CashSession>,
+    pub sessions: Vec<CashSession>,
+    pub refunds: Vec<RefundReceipt>,
+    pub sale_sessions: Vec<SaleSession>,
 }

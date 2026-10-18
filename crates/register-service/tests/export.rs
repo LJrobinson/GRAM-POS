@@ -25,6 +25,8 @@ fn checkout(service: &RegisterService, key: &str) -> CheckoutInput {
     }];
     let quote = service.quote(&lines).unwrap();
     CheckoutInput {
+        expected_session_id: None,
+        expected_currency: None,
         idempotency_key: key.into(),
         lines,
         tender_minor: "10000".into(),
@@ -48,6 +50,12 @@ fn empty_backup_round_trips_without_initializing_demo() {
 fn backup_restores_settings_draft_receipts_keys_and_immutability() {
     let mut service = RegisterService::in_memory().unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let request = checkout(&service, "checkout-one");
     let receipt = service.complete_cash_sale(request.clone()).unwrap();
     let mut config = service.state().unwrap().config.unwrap();
@@ -78,6 +86,12 @@ fn backup_restores_settings_draft_receipts_keys_and_immutability() {
 fn sales_export_has_full_original_receipts_and_exact_strings() {
     let mut service = RegisterService::in_memory().unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let receipt = service
         .complete_cash_sale(checkout(&service, "one"))
         .unwrap();
@@ -85,7 +99,7 @@ fn sales_export_has_full_original_receipts_and_exact_strings() {
     let v: Value = serde_json::from_str(&file.content).unwrap();
     assert_eq!(file.media_type, "application/json");
     assert_eq!(v["format"], "gram-pos-sales");
-    assert_eq!(v["format_version"], 1);
+    assert_eq!(v["format_version"], 2);
     assert_eq!(v["receipts"][0], serde_json::to_value(receipt).unwrap());
     assert_eq!(v["receipts"][0]["quote"]["total_minor"], "3000");
     assert_eq!(
@@ -97,6 +111,12 @@ fn sales_export_has_full_original_receipts_and_exact_strings() {
 fn restore_preserves_sequence_high_water_without_reusing_ids() {
     let mut service = RegisterService::in_memory().unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     service
         .complete_cash_sale(checkout(&service, "one"))
         .unwrap();
@@ -120,6 +140,12 @@ fn restore_preserves_sequence_high_water_without_reusing_ids() {
 fn restore_refuses_existing_files_and_bad_data_before_creating_destination() {
     let mut service = RegisterService::in_memory().unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     service
         .complete_cash_sale(checkout(&service, "one"))
         .unwrap();
@@ -150,6 +176,12 @@ fn missing_receipt_fails_closed_instead_of_exporting_incomplete_history() {
     let mut service = RegisterService::open(&source).unwrap();
     service.initialize_demo().unwrap();
     service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
+    service
         .complete_cash_sale(checkout(&service, "one"))
         .unwrap();
     drop(service);
@@ -168,6 +200,12 @@ fn legacy_snapshots_without_archived_fields_keep_original_bytes() {
     let source = path();
     let mut service = RegisterService::open(&source).unwrap();
     service.initialize_demo().unwrap();
+    service
+        .handle(
+            "open_cash_session",
+            json!({"idempotency_key":"test-open", "opening_float_minor":"0"}),
+        )
+        .unwrap();
     let request = checkout(&service, "legacy");
     service.complete_cash_sale(request.clone()).unwrap();
     drop(service);

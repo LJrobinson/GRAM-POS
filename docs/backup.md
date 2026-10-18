@@ -12,8 +12,8 @@ exact strings; no spreadsheet floating-point conversion occurs.
 
 Use **Download portable backup** for a versioned logical snapshot of the whole register:
 current configuration and revision, any draft, all sales and original checkout
-requests/idempotency keys, immutable sale snapshots and receipts, and the sales
-sequence high-water mark. Backup is not a sales report. Keep both if needed.
+requests/idempotency keys, immutable sale snapshots and receipts, cash sessions,
+closing counts, refunds, sale/session links, and all sequence high-water marks. Backup is not a sales report. Keep both if needed.
 
 Exports use one SQLite read transaction, so another process cannot mix settings
 from one moment with sales from another. A backup never clears the draft or
@@ -66,9 +66,9 @@ old file separately, keep all app/server processes closed, and never replace a
 live SQLite file or copy it while writes are occurring. Consult a technical
 operator if uncertain. Do not delete an old database to troubleshoot a failure.
 
-## Portable format v1
+## Older portable format v1 (accepted for recovery)
 
-Both exports are UTF-8 JSON with `format` and numeric `format_version: 1`.
+Milestone-3 exports are UTF-8 JSON with `format` and numeric `format_version: 1`.
 `gram-pos-sales` has a `receipts` array ordered by ascending sale ID.
 `gram-pos-backup` additionally has numeric `schema_version: 1` and:
 
@@ -82,8 +82,41 @@ Both exports are UTF-8 JSON with `format` and numeric `format_version: 1`.
   not parsed objects: preserving their bytes preserves checkout retry semantics.
 - `sales_sequence`: nonnegative integer string, at least the maximum sale ID.
 
-Unknown format/schema versions are rejected, not guessed or automatically
-migrated. The included CLI is the supported v1 recovery mechanism. A technical
+Unknown format/schema versions are rejected, not guessed. The current CLI
+accepts v1/schema-1 backups and restores their sales as legacy history into the
+current schema, without attributing them to a new drawer. A technical
 reimplementation must preserve original raw JSON, IDs, keys, current revision,
 sequence high water, constraints and immutability triggers; recomputing receipts
 from today's catalog or re-running checkouts is **not** recovery.
+
+
+## Portable format v2 (current export)
+
+Current exports use numeric `format_version: 2`. The `gram-pos-sales` report
+retains `receipts` and also includes the cash ledger, so gross original receipts
+are never silently presented as net-of-refund sales. It is a report, not a
+recoverable backup.
+
+`gram-pos-backup` uses numeric `schema_version: 2`, retaining all v1 fields and
+adding:
+
+- `cash_sessions`: opening rows `{id,idempotency_key,request_json,session_json}`.
+- `cash_closes`: immutable `{session_id,request_json,session_json}` rows.
+- `sale_sessions`: `{sale_id,session_id}` associations for tracked sales.
+- `refunds`: `{id,sale_id,session_id,idempotency_key,request_json,receipt_json}`.
+- `cash_sessions_sequence` and `refunds_sequence`: exact nonnegative strings.
+- `legacy_sale_max_id`: the migration boundary separating pre-session sales
+  from new sales that must have a session association.
+
+Raw JSON fields preserve their original bytes, including request identities.
+Recovery validates cross-record identities, currencies/precision, exact refund
+amounts against original receipts, session totals and close counts, duplicate or
+missing relationships, and sequence bounds before creating the destination.
+Session/refund records and their immutable constraints are restored together.
+No inventory return or payment-processor action occurs during recovery.
+
+Schema-1 database migration is an explicit transaction and does not rewrite old
+receipt or request bytes. Old sales stay unassigned, not cash movements in the
+next opened drawer. Do not open a schema-2 database with an older app; retain a
+pre-upgrade backup separately. New backups include the whole ledger and cannot
+be imported by milestone-3 binaries.

@@ -13,6 +13,13 @@ test('real Rust register: mixed cart, responsive layout, lost response retry, re
   await page.goto('/');
   await page.getByRole('button', { name: 'Load demo register' }).click();
   await expect(page.getByRole('button', { name: /Demo Bulk A/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Manage cash', exact: true }).click();
+  await page.getByRole('button', { name: 'Open cash session', exact: true }).click();
+  await page.getByLabel('Opening float (USD)', { exact: true }).fill('100');
+  await page.getByRole('button', { name: 'Review opening float', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm opening float', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Open drawer session', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Register', exact: true }).click();
   for (const [name, weight] of [['Demo Bulk A', '3.62'], ['Demo Bulk B', '3.58']]) {
     await page.getByRole('button', { name: new RegExp(name) }).click();
     await page.getByLabel('Measured weight', { exact: true }).fill(weight);
@@ -164,7 +171,7 @@ test('catalog editing, archives, atomic validation, conflict recovery and portab
     expect(await file.failure()).toBeNull();
     const data = JSON.parse(await readFile(testInfo.outputPath(file.suggestedFilename()), 'utf8'));
     expect(data.format).toBe(label === 'Download portable backup' ? 'gram-pos-backup' : 'gram-pos-sales');
-    expect(data.format_version).toBe(1);
+    expect(data.format_version).toBe(2);
     if (label === 'Download portable backup') expect(JSON.parse(data.settings.config_json).catalog[number - 1].name).toBe('Other window edit');
     else expect(data.receipts).toHaveLength((await api('list_sales')).sales.length);
   }
@@ -175,11 +182,101 @@ test('catalog editing, archives, atomic validation, conflict recovery and portab
   await page.screenshot({ path: testInfo.outputPath('catalog-phone.png'), fullPage: true });
 });
 
+test('full refund and immutable drawer close recover lost responses across restart', async ({ page, request }, testInfo) => {
+  const api = async (command: string, payload: unknown = {}) => {
+    const result = await (await request.post('/api/command', { data: { command, payload } })).json();
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    return result.data;
+  };
+  await api('save_draft', { lines: [] });
+  const before = await api('get_cash_ledger');
+  const sale = (await api('list_sales')).sales[0];
+  const original = await api('get_receipt', { sale_id: sale.sale_id });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sales history', exact: true }).click();
+  await page.locator('.sale-row').first().click();
+  await page.getByRole('button', { name: 'Refund full receipt', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review full refund', exact: true })).toBeDisabled();
+  await page.getByLabel('Refund reason', { exact: true }).fill('Training customer return');
+  await page.getByRole('button', { name: 'Review full refund', exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath('refund-confirmation.png'), fullPage: true });
+  let dropped = false;
+  const refundKeys: string[] = [];
+  await page.route('**/api/command', async route => {
+    const body = route.request().postDataJSON();
+    if (body.command === 'refund_cash_sale') {
+      refundKeys.push(body.payload.idempotency_key);
+      if (!dropped) { dropped = true; const result = await route.fetch(); expect((await result.json()).ok).toBe(true); await route.abort('failed'); return; }
+    }
+    await route.continue();
+  });
+  await page.getByRole('button', { name: 'Confirm full cash refund', exact: true }).click({ clickCount: 2 });
+  await expect(page.getByRole('button', { name: 'Retry same cash action', exact: true })).toBeEnabled();
+  await page.reload();
+  await page.getByRole('button', { name: 'Retry same cash action', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Cash sessions.' })).toBeVisible();
+  expect(refundKeys).toHaveLength(2); expect(refundKeys[0]).toBe(refundKeys[1]);
+  let ledger = await api('get_cash_ledger');
+  expect(ledger.refunds).toHaveLength(before.refunds.length + 1);
+  expect(await api('get_receipt', { sale_id: sale.sale_id })).toEqual(original);
+  const expected = ledger.active_session.expected_cash_minor;
+  const counted = (BigInt(expected) - 50n).toString();
+  await page.getByRole('button', { name: 'Count and close session', exact: true }).click();
+  await page.getByLabel('Counted cash (USD)', { exact: true }).fill(`${BigInt(counted) / 100n}.${(BigInt(counted) % 100n).toString().padStart(2, '0')}`);
+  await page.getByRole('button', { name: 'Review closing count', exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath('cash-session-close.png'), fullPage: true });
+  let closeDropped = false;
+  await page.route('**/api/command', async route => {
+    if (!closeDropped && route.request().postDataJSON().command === 'close_cash_session') {
+      closeDropped = true; const result = await route.fetch(); expect((await result.json()).ok).toBe(true); await route.abort('failed');
+    } else await route.fallback();
+  });
+  await page.getByRole('button', { name: 'Confirm and close session', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry same cash action', exact: true })).toBeEnabled();
+  await page.reload();
+  await page.getByRole('button', { name: 'Retry same cash action', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'No open cash session', exact: true })).toBeVisible();
+  ledger = await api('get_cash_ledger');
+  expect(ledger.active_session).toBeNull();
+  const closed = ledger.sessions.find((s: { session_id: string }) => s.session_id === before.active_session.session_id);
+  expect(closed.counted_minor).toBe(counted); expect(closed.variance_minor).toBe('-50');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('cash-session-history-phone.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Register', exact: true }).click();
+  await page.getByRole('button', { name: /Demo 3.5 g Fixed Pack/ }).click();
+  await page.getByRole('button', { name: 'Add to cart', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Charge cash/ })).toBeDisabled();
+  await page.getByRole('button', { name: 'Cash sessions', exact: true }).click();
+  await page.getByRole('button', { name: 'Open cash session', exact: true }).click();
+  await page.getByLabel('Opening float (USD)', { exact: true }).fill('25');
+  await page.getByRole('button', { name: 'Review opening float', exact: true }).click();
+  let openDropped = false;
+  const openKeys: string[] = [];
+  await page.route('**/api/command', async route => {
+    const body = route.request().postDataJSON();
+    if (body.command === 'open_cash_session') {
+      openKeys.push(body.payload.idempotency_key);
+      if (!openDropped) { openDropped = true; const result = await route.fetch(); expect((await result.json()).ok).toBe(true); await route.abort('failed'); return; }
+    }
+    await route.fallback();
+  });
+  await page.getByRole('button', { name: 'Confirm opening float', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry same cash action', exact: true })).toBeEnabled();
+  await page.reload();
+  await page.getByRole('button', { name: 'Retry same cash action', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Open drawer session', exact: true })).toBeVisible();
+  expect(openKeys).toHaveLength(2); expect(openKeys[0]).toBe(openKeys[1]);
+  expect((await api('get_cash_ledger')).sessions).toHaveLength(before.sessions.length + 1);
+  await page.screenshot({ path: testInfo.outputPath('cash-session-open-phone.png'), fullPage: true });
+});
+
 test('blank onboarding requires explicit currency and opens configuration', async ({ page }) => {
   let configured = false;
   const config = { schema_version: 1, demo: true, tax_mode: 'demo_no_tax', currency: { code: 'CAD', minor_unit_exponent: 2 }, groups: [], catalog: [] };
   await page.route('**/api/command', async route => {
     const { command, payload } = route.request().postDataJSON();
+    if (command === 'get_cash_ledger') { await route.fulfill({ json: { ok: true, data: { active_session: null, sessions: [], refunds: [], sale_sessions: [] } } }); return; }
     if (command === 'initialize_empty') {
       expect(payload).toEqual({ currency: { code: 'CAD', minor_unit_exponent: 2 } });
       configured = true;
