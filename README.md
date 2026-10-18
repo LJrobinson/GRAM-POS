@@ -56,6 +56,16 @@ Review the original full-sale refund with a reason, then compare counted cash wi
 
 </details>
 
+## Milestone 5: printable receipts and date-filtered reports
+
+Version **0.5.0** adds a focused, read-only view of the saved record:
+
+- Print only the selected immutable receipt, including original product details, exact weights/pricing and currency. Current refund references are separate from the unchanged original sale.
+- Report sales and refunds by their own event dates with explicit UTC start-inclusive/end-exclusive boundaries. Gross, refunds and net stay separate for every currency and precision; cash float/tender/change are not revenue.
+- Export formula-defended UTF-8 CSV with exact minor-unit amounts, summary rows and event rows. CSV is a report, not a recovery backup.
+
+See [receipts and reports](docs/receipts-and-reports.md) for dates, spreadsheet import guidance and printing limits. Printing opens a user-controlled dialog; no silent printing or printer drivers are added. Physical printers and native printing remain unverified. New screenshots will be added only from a passing real-browser run; the screenshots above remain identified milestone-4 captures.
+
 ## Milestone 4: cash sessions and full-sale refunds
 
 Version **0.4.0** adds a training-only cash ledger without rewriting any sale:

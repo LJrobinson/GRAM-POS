@@ -293,3 +293,279 @@ test('blank onboarding requires explicit currency and opens configuration', asyn
   await expect(page.getByRole('heading', { name: 'Configuration.' })).toBeVisible();
   await expect(page.getByText('No products yet.', { exact: false })).toBeVisible();
 });
+
+// Keep this flow after the original fresh-database flow above. It also runs alone:
+// its own catalog, session, receipts and refund are created through the real service.
+test.describe('Printable receipts and sales reports', () => {
+  test.use({ timezoneId: 'Pacific/Honolulu' });
+
+  test('immutable receipt, cancel-safe printing, UTC reports and spreadsheet-safe CSV', async ({ page, request }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const api = async (command: string, payload: unknown = {}) => {
+      const response = await request.post('/api/command', { data: { command, payload } });
+      expect(response.ok()).toBe(true);
+      const result = await response.json();
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      return result.data;
+    };
+    if (!(await api('get_state')).configured) await api('initialize_demo');
+    await api('save_draft', { lines: [] });
+    const initial = await api('get_state');
+    expect(initial.config.currency).toEqual({ code: 'USD', minor_unit_exponent: 2 });
+    initial.config.groups.push({
+      id: 'report-test-group', name: 'Original snapshot schedule',
+      tiers: [{ nominal_grams: '3.500', tolerance_grams: '0.150', price_minor: '3125' }],
+      overage_policy: 'full_actual_at_tier_rate', rounding: 'half_up',
+      below_smallest: 'proportional_at_smallest_tier', tolerance_scope: 'aggregate_pricing_group',
+    });
+    initial.config.catalog.push(
+      { sku: 'REPORT-MEASURED', name: 'Original bulk "Summer"', kind: 'measured', declared_content_grams: null, archived: false, pricing: { kind: 'weight_group', group_id: 'report-test-group' } },
+      { sku: 'REPORT-PACK', name: 'Original 3.5 g pack', kind: 'prepacked', declared_content_grams: '3.500', archived: false, pricing: { kind: 'fixed_unit', unit_price_minor: '725' } },
+    );
+    await api('put_config', { config: initial.config, expected_config_revision: initial.config_revision });
+    let ledger = await api('get_cash_ledger');
+    if (!ledger.active_session) {
+      await api('open_cash_session', { idempotency_key: 'report-test-open', opening_float_minor: '2500', expected_currency: initial.config.currency });
+      ledger = await api('get_cash_ledger');
+    }
+    const checkout = async (id: string, lines: unknown[], tender: string) => {
+      const quote = await api('quote_cart', { lines });
+      return api('complete_cash_sale', {
+        idempotency_key: id, lines, tender_minor: tender,
+        expected_total_minor: quote.total_minor, expected_config_revision: quote.config_revision,
+        expected_session_id: ledger.active_session.session_id, expected_currency: initial.config.currency,
+      });
+    };
+    const original = await checkout('report-test-mixed-sale', [
+      { id: 'report-measured-line', sku: 'REPORT-MEASURED', quantity: { kind: 'measured', grams: '3.620' } },
+      { id: 'report-pack-line', sku: 'REPORT-PACK', quantity: { kind: 'prepacked', count: '2' } },
+    ], '5000');
+    expect(original.quote.total_minor).toBe('4575');
+    expect(original.change_minor).toBe('425');
+    const other = await checkout('report-test-other-sale', [
+      { id: 'report-other-line', sku: 'REPORT-PACK', quantity: { kind: 'prepacked', count: '1' } },
+    ], '1000');
+    expect(other.quote.total_minor).toBe('725');
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Sales history', exact: true }).click();
+    await page.locator('.sale-row').filter({ hasText: original.receipt_number }).click();
+    const receipt = page.locator('#print-receipt');
+    await expect(receipt).toHaveAttribute('data-sale-id', original.sale_id);
+    await expect(receipt).toContainText('Original bulk "Summer"');
+    await expect(receipt).toContainText('3.620 g measured');
+    await expect(receipt).toContainText('2 × 3.500 g declared');
+    await expect(receipt).toContainText('$31.25');
+    await expect(receipt).toContainText('$14.50');
+    await expect(receipt.locator('.receipt-total')).toContainText('$45.75');
+    await expect(receipt.locator('.change-row')).toContainText('$4.25');
+    await expect(receipt).toContainText('UTC');
+    const originalHtml = await receipt.innerHTML();
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+
+    // Historical values must remain the saved snapshot, not today's catalog or price.
+    const changed = await api('get_state');
+    for (const item of changed.config.catalog) {
+      if (item.sku === 'REPORT-MEASURED' || item.sku === 'REPORT-PACK') {
+        item.name = `Renamed ${item.sku}`;
+        item.archived = true;
+        if (item.kind === 'prepacked') {
+          item.declared_content_grams = '99.000';
+          item.pricing.unit_price_minor = '9999';
+        }
+      }
+    }
+    const changedGroup = changed.config.groups.find((group: { id: string }) => group.id === 'report-test-group');
+    changedGroup.name = 'Renamed current schedule';
+    changedGroup.tiers[0].price_minor = '9900';
+    await api('put_config', { config: changed.config, expected_config_revision: changed.config_revision });
+    const refundReason = '=1+1, "training return", café';
+    const refund = await api('refund_cash_sale', {
+      idempotency_key: 'report-test-refund', sale_id: original.sale_id, reason: refundReason,
+      expected_session_id: ledger.active_session.session_id, expected_currency: initial.config.currency,
+    });
+    expect(refund.amount_minor).toBe('4575');
+    await page.reload();
+    await page.getByRole('button', { name: 'Sales history', exact: true }).click();
+    await page.locator('.sale-row').filter({ hasText: original.receipt_number }).click();
+    await expect(page.locator('.refund-status')).toContainText('Fully refunded');
+    expect(await receipt.innerHTML()).toBe(originalHtml);
+    expect(await api('get_receipt', { sale_id: original.sale_id })).toEqual(original);
+    await expect(receipt).not.toContainText('Renamed');
+    await expect(receipt).not.toContainText('99.000');
+    await page.screenshot({ path: testInfo.outputPath('receipt-preview-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('receipt-preview-phone.png'), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+
+    const ledgerBeforePrint = await api('get_cash_ledger');
+    const salesBeforePrint = await api('list_sales');
+    const draftBeforePrint = (await api('get_state')).draft;
+    await page.evaluate(() => {
+      const state = window as Window & { receiptPrintCalls?: number };
+      state.receiptPrintCalls = 0;
+      // Returning without printing models a cancelled OS print dialog. No API is mocked.
+      window.print = () => { state.receiptPrintCalls = (state.receiptPrintCalls ?? 0) + 1; };
+    });
+    await page.getByRole('button', { name: 'Print receipt', exact: true }).click();
+    expect(await page.evaluate(() => (window as Window & { receiptPrintCalls?: number }).receiptPrintCalls)).toBe(1);
+    await expect(receipt).toBeVisible();
+    expect(await receipt.innerHTML()).toBe(originalHtml);
+    expect(await api('get_cash_ledger')).toEqual(ledgerBeforePrint);
+    expect(await api('list_sales')).toEqual(salesBeforePrint);
+    expect((await api('get_state')).draft).toEqual(draftBeforePrint);
+    expect(await api('get_receipt', { sale_id: original.sale_id })).toEqual(original);
+
+    // Exercise the actual print stylesheet and Chromium PDF renderer, not just the button.
+    await page.emulateMedia({ media: 'print' });
+    await expect(receipt).toBeVisible();
+    await expect(page.locator('.sale-row').first()).toBeHidden();
+    await expect(page.locator('.receipt-actions')).toBeHidden();
+    await expect(page.locator('.refund-status')).toBeHidden();
+    const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
+    const printedText = normalize(await page.locator('body').innerText());
+    expect(printedText).toBe(normalize(await receipt.innerText()));
+    expect(printedText).toContain(original.receipt_number);
+    expect(printedText).not.toContain(other.receipt_number);
+    expect(printedText).not.toContain('Fully refunded');
+    expect(printedText).not.toContain('Sales history');
+    const pdfPath = testInfo.outputPath('receipt-print.pdf');
+    const pdf = await page.pdf({ path: pdfPath, format: 'A4', printBackground: true, preferCSSPageSize: true });
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+    await testInfo.attach('Selected receipt print PDF', { path: pdfPath, contentType: 'application/pdf' });
+    await page.screenshot({ path: testInfo.outputPath('receipt-print.png'), fullPage: true });
+    await page.emulateMedia({ media: 'screen' });
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await page.getByRole('button', { name: 'Reports', exact: true }).click();
+
+    const reports = page.getByRole('region', { name: 'Sales reports', exact: true });
+    // Deliberately run the browser outside UTC. Report boundaries are still UTC.
+    expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Honolulu');
+    const start = new Date(Number(original.created_at_unix) * 1000).toISOString().slice(0, 10);
+    const end = new Date(Number(refund.created_at_unix) * 1000 + 86_400_000).toISOString().slice(0, 10);
+    await reports.getByLabel('Start date (inclusive)', { exact: true }).fill(start);
+    await reports.getByLabel('End date (exclusive)', { exact: true }).fill(end);
+    await reports.getByRole('button', { name: 'Load report', exact: true }).click();
+    const summary = reports.getByTestId('report-currency-USD-2');
+    await expect(summary).toBeVisible();
+    await expect(reports).toContainText('UTC');
+    await expect(reports).toContainText(start);
+    await expect(reports).toContainText(end);
+    const startUnix = BigInt(Date.parse(`${start}T00:00:00Z`) / 1000);
+    const endUnix = BigInt(Date.parse(`${end}T00:00:00Z`) / 1000);
+    const inRange = (unix: string) => BigInt(unix) >= startUnix && BigInt(unix) < endUnix;
+    const savedSales = (await api('list_sales')).sales.filter((sale: { created_at_unix: string }) => inRange(sale.created_at_unix));
+    const savedRefunds = (await api('get_cash_ledger')).refunds.filter((item: { created_at_unix: string }) => inRange(item.created_at_unix));
+    const gross = savedSales.reduce((total: bigint, sale: { total_minor: string }) => total + BigInt(sale.total_minor), 0n) as bigint;
+    const refunds = savedRefunds.reduce((total: bigint, item: { amount_minor: string }) => total + BigInt(item.amount_minor), 0n) as bigint;
+    const dollars = (minor: bigint) => `$${(minor / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${(minor % 100n).toString().padStart(2, '0')}`;
+    await expect(summary.getByTestId('gross-sales')).toHaveText(dollars(gross));
+    await expect(summary.getByTestId('refunds')).toHaveText(dollars(refunds));
+    await expect(summary.getByTestId('net-sales')).toHaveText(dollars(gross - refunds));
+    await expect(reports.getByTestId('report-event')).toHaveCount(savedSales.length + savedRefunds.length);
+    await expect(reports.locator(`[data-event-kind="refund"][data-event-id="${refund.refund_id}"]`)).toContainText('training return');
+    await page.screenshot({ path: testInfo.outputPath('sales-reports-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await expect(reports.getByRole('button', { name: 'Export report CSV', exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('sales-reports-phone.png'), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+
+    await page.evaluate(() => {
+      const state = window as Window & { reportDownloadTypes?: string[] };
+      state.reportDownloadTypes = [];
+      const createObjectURL = URL.createObjectURL.bind(URL);
+      URL.createObjectURL = (object: Blob | MediaSource) => {
+        if (object instanceof Blob) state.reportDownloadTypes!.push(object.type);
+        return createObjectURL(object);
+      };
+    });
+    const exportResponse = page.waitForResponse(response => response.url().endsWith('/api/command') && response.request().postDataJSON()?.command === 'export_sales_report_csv');
+    const downloadReady = page.waitForEvent('download');
+    await reports.getByRole('button', { name: 'Export report CSV', exact: true }).click();
+    const download = await downloadReady;
+    expect(download.suggestedFilename()).toBe('gram-pos-sales-report.csv');
+    const csvPath = testInfo.outputPath('gram-pos-sales-report.csv');
+    await download.saveAs(csvPath);
+    expect(await download.failure()).toBeNull();
+    const csv = await readFile(csvPath, 'utf8');
+    const exported = await (await exportResponse).json();
+    expect(exported.ok).toBe(true);
+    expect(exported.data.media_type).toBe('text/csv;charset=utf-8');
+    expect(csv).toBe(exported.data.content);
+    expect(await page.evaluate(() => (window as Window & { reportDownloadTypes?: string[] }).reportDownloadTypes)).toEqual(['text/csv;charset=utf-8']);
+    expect(csv).toContain(`"'${refundReason.replaceAll('"', '""')}"`);
+    const records = parseReportCsv(csv);
+    const expectedHeader = ['record_type', 'start_date', 'end_date', 'timezone', 'currency_code', 'minor_unit_exponent', 'gross_sales_minor', 'refunds_minor', 'net_sales_minor', 'sale_count', 'refund_count', 'event_kind', 'event_id', 'sale_id', 'created_at_unix', 'total_minor', 'session_id', 'reason'];
+    expect(records[0]).toEqual(expectedHeader);
+    expect(records.every(row => row.length === expectedHeader.length)).toBe(true);
+    const rows = records.slice(1).map(row => Object.fromEntries(expectedHeader.map((name, index) => [name, row[index]])));
+    expect(rows).toHaveLength(1 + savedSales.length + savedRefunds.length);
+    expect(rows[0]).toMatchObject({ record_type: 'summary', start_date: start, end_date: end, timezone: 'UTC', currency_code: 'USD', minor_unit_exponent: '2', gross_sales_minor: String(gross), refunds_minor: String(refunds), net_sales_minor: String(gross - refunds), sale_count: String(savedSales.length), refund_count: String(savedRefunds.length) });
+    expect(rows.find(row => row.event_kind === 'refund' && row.event_id === refund.refund_id)).toMatchObject({ sale_id: original.sale_id, total_minor: '4575', reason: `'${refundReason}` });
+    expect(rows.find(row => row.event_kind === 'sale' && row.event_id === original.sale_id)).toMatchObject({ sale_id: original.sale_id, total_minor: '4575', reason: '' });
+    await testInfo.attach('Sales report CSV', { path: csvPath, contentType: 'text/csv' });
+
+    await reports.getByLabel('Start date (inclusive)', { exact: true }).fill('2000-01-01');
+    await reports.getByLabel('End date (exclusive)', { exact: true }).fill('2000-01-02');
+    await reports.getByRole('button', { name: 'Load report', exact: true }).click();
+    await expect(reports.getByRole('heading', { name: 'No activity in this range', exact: true })).toBeVisible();
+    await expect(reports.getByTestId('report-event')).toHaveCount(0);
+    await expect(reports.getByTestId('report-currency-USD-2')).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('sales-reports-empty.png'), fullPage: true });
+    expect(await api('get_cash_ledger')).toEqual(ledgerBeforePrint);
+    expect(await api('list_sales')).toEqual(salesBeforePrint);
+    expect(await api('get_receipt', { sale_id: original.sale_id })).toEqual(original);
+    expect(errors).toEqual([]);
+
+    // A real value beyond Number.MAX_SAFE_INTEGER must remain exact and fit
+    // narrow receipt paper, including its total and tender rows.
+    const largeState = await api('get_state');
+    largeState.config.catalog.push({ sku: 'REPORT-LARGE', name: 'Large exact-value training pack', kind: 'prepacked', declared_content_grams: '1.000', archived: false, pricing: { kind: 'fixed_unit', unit_price_minor: '9007199254740993' } });
+    await api('put_config', { config: largeState.config, expected_config_revision: largeState.config_revision });
+    const large = await checkout('report-test-large-sale', [{ id: 'report-large-line', sku: 'REPORT-LARGE', quantity: { kind: 'prepacked', count: '1' } }], '9007199254740993');
+    expect(large.quote.total_minor).toBe('9007199254740993');
+    await page.reload();
+    await page.getByRole('button', { name: 'Sales history', exact: true }).click();
+    await page.locator('.sale-row').filter({ hasText: large.receipt_number }).click();
+    await expect(receipt.locator('.receipt-total')).toContainText('$90,071,992,547,409.93');
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await receipt.evaluate(root => root.scrollWidth <= root.clientWidth + 1)).toBe(true);
+    await page.emulateMedia({ media: 'print' });
+    const printLayout = await receipt.evaluate(root => {
+      const boundary = root.getBoundingClientRect();
+      const amounts = [...root.querySelectorAll<HTMLElement>('.receipt-lines > div > strong, .receipt-totals > div > :last-child')];
+      return { width: boundary.width, overflow: amounts.filter(amount => amount.scrollWidth > amount.clientWidth + 1 || amount.getBoundingClientRect().right > boundary.right + 1).map(amount => amount.textContent) };
+    });
+    expect(printLayout.width).toBeLessThanOrEqual(273); // 72 mm at Chromium's 96 CSS px/in.
+    expect(printLayout.overflow).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath('receipt-print-large.png'), fullPage: true });
+    await page.emulateMedia({ media: 'screen' });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    expect(await api('get_receipt', { sale_id: large.sale_id })).toEqual(large);
+    expect(errors).toEqual([]);
+  });
+});
+
+/** Parse RFC 4180 fields, including doubled quotes and embedded CR/LF in reasons. */
+function parseReportCsv(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], field = '', quoted = false;
+  for (let index = 0; index < csv.length; index += 1) {
+    const char = csv[index];
+    if (quoted) {
+      if (char !== '"') field += char;
+      else if (csv[index + 1] === '"') { field += '"'; index += 1; }
+      else quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === ',') { row.push(field); field = ''; }
+    else if (char === '\r' && csv[index + 1] === '\n') {
+      row.push(field); rows.push(row); row = []; field = ''; index += 1;
+    } else throw new Error(`Unexpected unquoted CSV character at ${index}`);
+  }
+  if (quoted || field || row.length) throw new Error('Incomplete RFC 4180 record');
+  return rows;
+}

@@ -1,3 +1,30 @@
+# Milestone 5 validation
+
+Implemented from merged main `82d3e2ae773a591d4c253764be81215f5687d9df` on 2026-10-18. All 68 tracked local blobs were verified byte-for-byte against that Git tree before editing; no divergent user files were overwritten. App version is 0.5.0. The SQLite schema and backup/recovery formats are unchanged.
+
+## Executed locally
+
+- Rust stable 1.99.1 `cargo test --workspace --all-targets --all-features --locked`: 96 tests passed (43 core + 53 service).
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo test --workspace --doc --locked`: passed, no documentation test cases.
+- `cargo run --example pricing_demo --locked`: passed.
+- Native host formatting and locked no-dependency metadata: passed.
+- Frontend `npm run typecheck`: passed.
+- Frontend `npm test`: 41 tests passed (including 10 receipt and 10 report tests).
+- Frontend `npm run build`: passed for app version 0.5.0.
+- `npx playwright test --list`: all 5 browser scenarios discovered; discovery is not runtime execution.
+
+New backend coverage checks strict Gregorian/UTC dates and start-inclusive/end-exclusive boundaries, refunds dated outside the original-sale range, currency-plus-precision separation, negative net, exact totals beyond u64, legacy sales exactly once, renamed/archived catalog history, unchanged backup/replay, corrupt-ledger rejection, Unicode/quote/newline CSV escaping, formula-prefix defense and header-only empty exports. Independent read-only code review found no backend semantic blockers.
+
+## Runtime evidence boundary
+
+No milestone-5 browser runtime, screenshots, native Windows runtime or physical printing pass is claimed locally. Browser socket execution and native GTK/GObject dependencies remain unavailable in this environment; no repeat escalation was attempted. CI runs the real Rust/browser scenarios and Windows native checks/unsigned packaging. The new browser scenario verifies immutable receipt contents after catalog changes, explicit print-call cancellation without ledger mutation, print-only CSS/DOM and Chromium PDF output, report totals/date filtering/CSV content, and desktop/mobile screenshots. Test discovery or successful packaging is not physical printer, native save-dialog, production-payment/tax/compliance, or security certification.
+
+The README retains clearly identified milestone-4 screenshots until original milestone-5 artifacts are obtained from a passing browser CI run and visually inspected. Current report and print behavior/limitations are documented in [receipts and reports](docs/receipts-and-reports.md).
+
+---
+
 # Milestone 4 validation
 
 Implemented from main `ed648bed085606483d528381b22093b619442dcd` on 2026-10-18. Every tracked local source/artifact was verified against the published Git tree before editing; no divergent files were overwritten.

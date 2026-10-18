@@ -1,0 +1,34 @@
+# Printable receipts and sales reports
+
+Version 0.5.0 adds read-only reporting and printing to the training register. It adds no tax engine, fiscal certification, inventory adjustments, live payments, or synchronization.
+
+## Print an original receipt
+
+Open a saved sale from Sales history or a report event, then choose **Print receipt**. Only that receipt is included in the print layout; the register, navigation, other dialogs and action buttons are excluded. Browser and native WebView printing use the user-triggered system print dialog through `window.print()`. Choose your printer or a supported PDF destination there. Canceling printing does not change the sale, cash session, or refund records. No silent printing or printer-driver integration is implemented.
+
+Every product name, line quantity, declared package weight, pricing-group calculation, amount, currency, tender and change comes from the immutable saved receipt, not today's catalog. Renaming, repricing or archiving products does not rewrite receipts. A separate screen-only current-status section identifies an associated full refund and reference when known; it is excluded from the original receipt printout and does not change the original sale total. If refund status cannot be loaded, it is marked unavailable rather than assumed unrefunded. Receipts remain clearly marked demo/training, with no configured tax.
+
+Printing follows the [official Tauri printing guidance](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewWindow.html#method.print). Browser PDF/CSS validation is not physical-printer or native-device certification. Windows WebView2/system-dialog and physical-printer behavior require device testing; receipt paper sizes and printer margins remain user-selected.
+
+## Reports: UTC event dates, not drawer balances
+
+Open **Reports** and choose a UTC range. The start date at 00:00 UTC is included. The end date at 00:00 UTC is excluded. To report October 18, select start `2026-10-18` and end `2026-10-19`. This initial version supports UTC only, not the register's local calendar day. Dates use strict Gregorian `YYYY-MM-DD` syntax, including leap-year validation.
+
+- Gross sales include saved sales whose original sale event timestamp falls in the range.
+- Refunds include saved refund events whose own timestamp falls in the range, even when the original sale is outside the range.
+- Net sales equal gross sales minus refunds. A refund-only range can have a negative net.
+- Opening float, cash received, change, counted cash and drawer variances are not revenue.
+- Historical sales without a cash session are included once as legacy sales. Session summaries are never added to receipt totals.
+- Each currency code and precision is a separate group. There is no cross-currency grand total, exchange rate or precision conversion.
+
+Reports use one consistent, validated snapshot of stored records and retain exact integer minor-unit amounts. They do not rewrite source records. Device clock errors can affect the recorded event date; a report does not reconstruct a corrected business date. Refresh to include activity recorded since the last report load.
+
+## CSV is a report, not a backup
+
+**Export report CSV** creates a fresh server-generated snapshot for the selected range. It may include activity saved since the on-screen report was generated. The fixed `gram-pos-sales-report.csv` UTF-8 file contains a header, separate `summary` rows per currency/precision, and `event` rows for sales and refunds. Empty ranges produce the header only. Never add summary and event rows together. Gross/refund/net columns belong to summary rows; event amount and kind belong to event rows. Amount columns are integer minor units, with `minor_unit_exponent` indicating the decimal precision.
+
+Fields are quoted and embedded quotes/newlines escaped. Potential spreadsheet formula prefixes in user-authored refund reasons are neutralized with an apostrophe. This defense applies to CSV only; saved reasons are unchanged. CSV retains full exact digits, but spreadsheets may auto-round long numbers or reinterpret dates. Import identifiers and exact minor-unit columns as **text** when preserving large values matters. Unicode is preserved.
+
+Native exports use the OS destination picker and refuse to replace an existing file, even when the dialog offers overwrite. Canceling the picker saves nothing. Browser exports use the browser download workflow. Files are unencrypted and should be kept private.
+
+CSV and sales JSON reports cannot restore your register. Continue using the portable backup and the unchanged [offline recovery procedure](backup.md), which restores to a new database file and never overwrites the live store.

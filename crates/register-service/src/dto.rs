@@ -253,3 +253,52 @@ pub struct CashLedger {
     pub refunds: Vec<RefundReceipt>,
     pub sale_sessions: Vec<SaleSession>,
 }
+
+/// UTC calendar dates: start midnight inclusive, end midnight exclusive.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SalesReportInput {
+    pub start_date: String,
+    pub end_date: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SalesReport {
+    pub start_date: String,
+    pub end_date: String,
+    pub timezone: String,
+    pub groups: Vec<SalesReportGroup>,
+    pub events: Vec<SalesReportEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SalesReportGroup {
+    pub currency: CurrencyDto,
+    pub gross_sales_minor: String,
+    pub refunds_minor: String,
+    pub net_sales_minor: String,
+    pub sale_count: String,
+    pub refund_count: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SalesReportEventKind {
+    Sale,
+    Refund,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SalesReportEvent {
+    pub kind: SalesReportEventKind,
+    /// Scoped by kind: sale ID for a sale, refund ID for a refund.
+    pub event_id: String,
+    pub sale_id: String,
+    pub created_at_unix: String,
+    pub currency: CurrencyDto,
+    /// Nonnegative saved total; refunds are deducted only in grouped net totals.
+    pub total_minor: String,
+    /// Legacy sales have no session. Refunds always have their own session.
+    pub session_id: Option<String>,
+    pub reason: Option<String>,
+}

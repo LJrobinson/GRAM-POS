@@ -5,6 +5,7 @@
 
 mod dto;
 mod export;
+mod report;
 pub use dto::*;
 pub use export::ExportFile;
 
@@ -196,6 +197,14 @@ impl RegisterService {
             "initialize_empty" => {
                 let input: InitializeInput = decode(payload)?;
                 encode(self.initialize_empty(input.currency)?)
+            }
+            "sales_report" => {
+                let input: SalesReportInput = decode(payload)?;
+                encode(self.sales_report(input)?)
+            }
+            "export_sales_report_csv" => {
+                let input: SalesReportInput = decode(payload)?;
+                encode(self.export_sales_report_csv(input)?)
             }
             "export_sales" => {
                 let _: EmptyInput = decode(payload)?;
