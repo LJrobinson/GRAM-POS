@@ -11,3 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 
+
+[workspace]
+members = ["crates/register-service"]
+resolver = "2"

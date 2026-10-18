@@ -1,0 +1,13 @@
+export type Currency = { code: string; minor_unit_exponent: number };
+export type Quantity = { kind: 'measured'; grams: string } | { kind: 'prepacked'; count: string };
+export type CartLine = { id: string; sku: string; quantity: Quantity };
+export type CatalogItem = { sku: string; name: string; kind: 'measured' | 'prepacked'; declared_content_grams: string | null; pricing: { kind: 'weight_group'; group_id: string } | { kind: 'fixed_unit'; unit_price_minor: string } };
+export type GroupConfig = { id: string; name: string; tiers: { nominal_grams: string; tolerance_grams: string; price_minor: string }[]; overage_policy: 'full_actual_at_tier_rate' | 'excess_beyond_tolerance_at_tier_rate'; rounding: 'floor' | 'ceil' | 'half_up' | 'half_even'; below_smallest: 'proportional_at_smallest_tier' | 'reject'; tolerance_scope: 'aggregate_pricing_group' };
+export type Config = { schema_version: 1; demo: true; tax_mode: 'demo_no_tax'; currency: Currency; groups: GroupConfig[]; catalog: CatalogItem[] };
+export type RegisterState = { configured: boolean; config_revision: string; config: Config | null; catalog: CatalogItem[]; draft: { lines: CartLine[] } };
+export type PricedLine = CartLine & { name: string; declared_content_grams: string | null; amount_minor: string; explanation: Record<string, unknown> };
+export type PricedGroup = { group_id: string; actual_measured_grams: string; declared_package_grams: string; eligible_grams: string; selected_nominal_grams: string; tolerance_grams: string; billable_grams: string; rule: string; amount_minor: string; exact_numerator: string; exact_denominator: string; schedule: GroupConfig };
+export type Quote = { config_revision: string; currency: Currency; lines: PricedLine[]; groups: PricedGroup[]; total_minor: string; tax_mode: 'demo_no_tax' };
+export type Receipt = { sale_id: string; receipt_number: string; created_at_unix: string; quote: Quote; tender_minor: string; change_minor: string; payment_method: 'cash'; demo: true };
+export type SaleSummary = { sale_id: string; receipt_number: string; created_at_unix: string; total_minor: string; tender_minor: string; change_minor: string; currency: Currency; line_count: number };
+export type CheckoutPayload = { idempotency_key: string; lines: CartLine[]; tender_minor: string; expected_total_minor: string; expected_config_revision: string };

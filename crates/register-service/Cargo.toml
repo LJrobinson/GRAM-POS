@@ -1,0 +1,22 @@
+[package]
+name = "gram-register-service"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Local-only register commands and transactional cash-sale persistence"
+
+[dependencies]
+gram-pos-core = { path = "../.." }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tiny_http = { version = "0.12", optional = true }
+
+[features]
+default = []
+dev-server = ["dep:tiny_http"]
+
+[[bin]]
+name = "register-dev-server"
+path = "src/dev_server.rs"
+required-features = ["dev-server"]
