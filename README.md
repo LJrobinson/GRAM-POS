@@ -6,7 +6,7 @@ Repository: https://github.com/LJrobinson/GRAM-POS.
 
 ## See the prototype
 
-Real browser screenshots from the [passing milestone-3 CI run](https://github.com/LJrobinson/GRAM-POS/actions/runs/39166231704), using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.
+Real browser screenshots from the [passing milestone-4 browser CI job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) at commit `53332e4`, using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.
 
 ### Register
 
@@ -31,6 +31,31 @@ Download a consistent portable backup or a separate sales JSON report. Files are
 
 ![GRAM backup and sales export panel, including privacy and recovery guidance](docs/screenshots/backup-export-panel.png)
 
+### Cash refunds and drawer reconciliation
+
+Review the original full-sale refund with a reason, then compare counted cash with expected cash before permanently closing the drawer. No original receipt is rewritten and no stock return is inferred.
+
+<details>
+<summary>View full-receipt refund confirmation</summary>
+
+![GRAM full-receipt refund review with original receipt, exact total, and reason](docs/screenshots/refund-confirmation.png)
+
+</details>
+
+<details>
+<summary>View cash-session closing count and variance</summary>
+
+![GRAM close-session review showing starting float, sales, refunds, expected cash, counted cash and variance](docs/screenshots/cash-session-close.png)
+
+</details>
+
+<details>
+<summary>View mobile cash-session history</summary>
+
+![GRAM mobile cash-session history with permanent closing variance and refund record](docs/screenshots/cash-session-history-phone.png)
+
+</details>
+
 ## Milestone 4: cash sessions and full-sale refunds
 
 Version **0.4.0** adds a training-only cash ledger without rewriting any sale:
@@ -45,7 +70,7 @@ Sessions snapshot currency and precision. Close the session before changing curr
 
 The service explicitly migrates schema 1 stores to schema 2 while leaving their receipt/request bytes intact. The recovery tool accepts older v1 backups as legacy history and new v2 backups with the cash ledger. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
 
-The screenshots above remain verified milestone-3 examples until new milestone-4 browser CI captures are reviewed. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
+The screenshots above are original milestone-4 browser captures from the real Rust/SQLite test run. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
 
 ## Milestone 3: your catalog, local exports
 

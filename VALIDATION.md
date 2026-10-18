@@ -21,7 +21,11 @@ Ledger coverage includes exact refunds after catalog edits, changed-key double-r
 
 No milestone-4 browser screenshots or native Windows runtime pass is claimed locally. The previously verified environment lacks native GTK/GObject dependencies and browser socket execution; no repeat escalation was attempted. The Register CI workflow runs real-Rust browser E2E and native Windows checks/unsigned packaging. New browser coverage captures full-refund review, cash-session closing review, and mobile session history/open state; it exercises lost-response/reload recovery for opening, refund and closing, plus repeated refund clicks. The original mixed-cart checkout/catalog/export checks remain. The blank-onboarding case uses mocked transport; ledger cases use the real Rust adapter.
 
-README screenshots currently remain labeled milestone 3. Replace/add milestone-4 images only after successful CI artifacts are downloaded and inspected. CI evidence must match the published implementation commit. Successful unsigned installer builds do not establish real-device usability, peripherals, production payments/tax/compliance, or independent security certification.
+## Verified milestone-4 browser CI
+
+At commit `53332e4cf3cd2edb1cc7b20a2376cecfca189c85`, [Register browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) passed all four scenarios. Its original screenshots were downloaded and visually inspected for README; no generated mockup or pixel edits were substituted. The initial run exposed unnamed icon-only mobile navigation; explicit accessible labels corrected it, and the same mobile flow now passes.
+
+Core CI at this commit passed Linux/macOS/Windows, Rust 1.70 and Wasm checks. Frontend and service checks passed on Linux and Windows. Native Windows packaging was still running when this screenshot documentation was prepared; the final PR-head workflow result must be checked separately. Successful unsigned installer builds do not establish real-device usability, peripherals, production payments/tax/compliance, or independent security certification.
 
 ---
 
