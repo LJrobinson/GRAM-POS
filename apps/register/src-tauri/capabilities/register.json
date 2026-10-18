@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "register",
+  "description": "Only the bundled main register window may call the local register service.",
+  "windows": ["main"],
+  "local": true,
+  "permissions": ["allow-register-command"]
+}

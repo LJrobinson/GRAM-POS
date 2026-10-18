@@ -1,8 +1,46 @@
-# GRAM POS — pricing core, milestone 1
+# GRAM POS
 
-**GRAM POS** starts with the portable `gram-pos-core` Rust library. A portable, dependency-free Rust pricing library for LJ Robinson's configurable, open-source POS project. The first use case is deli and prepacked flower; the domain is deliberately generic.
+**GRAM POS** is a configurable, local-first point-of-sale project. The portable `gram-pos-core` Rust library powers a native register prototype. A portable, dependency-free Rust pricing library for LJ Robinson's configurable, open-source POS project. The first use case is deli and prepacked flower; the domain is deliberately generic.
 
-This is a **pricing-core prototype**, not an installable register, production dispensary system, compliance engine, payment processor, inventory system, or ERP. It does not take payments or record completed sales to a database. Repository: https://github.com/LJrobinson/GRAM-POS. This is the initial pricing-core milestone.
+Repository: https://github.com/LJrobinson/GRAM-POS.
+
+## Milestone 2: demo register
+
+A touch-friendly React interface calls the same Rust pricing engine through a local register service. Native Tauri packaging stores SQLite data in the application's per-user data directory. Registers operate independently; no hosted backend or device synchronization is required for the native app.
+
+- Explicitly load a demo catalog before use; settings and receipts remain marked **DEMO / no tax configured**.
+- Ring measured deli selections and integer-count prepackages in one cart.
+- See Rust-computed mix-and-match pricing without duplicating price logic in JavaScript.
+- Record a **demo cash sale** with tender, change, immutable receipt/config snapshots, and an atomic SQLite commit.
+- Recover a saved draft, reopen local sales history, and retry uncertain checkout requests using the same idempotency key.
+- Adjust supported pricing tiers, allowances, and overage settings; stale quotes cannot silently finalize at a different amount.
+
+This is **not production-ready dispensary software**, a card payment processor, tax/compliance engine, or inventory/ERP system. No real electronic payment is taken. Demo cash recording is for development and evaluation, not permission to conduct regulated sales.
+
+### Run the actual register locally for development
+
+The browser development adapter uses the real Rust service and a chosen SQLite file. It is loopback-only and is not a hosted production backend.
+
+Terminal 1, repository root:
+```sh
+cargo run -p gram-register-service --features dev-server --bin register-dev-server -- --db ./gram-demo.sqlite3 --port 4174
+```
+Terminal 2:
+```sh
+cd apps/register
+npm ci
+npm run dev
+```
+Open the displayed loopback Vite URL. Start with **Load demo register**. Use a separate demo database for experiments; do not point this prototype at another application's database.
+
+### Windows native development build
+
+See [native setup and packaging](apps/register/src-tauri/README.md). The included Register workflow tests the service and frontend, then builds an **unsigned Windows development installer**. A successful artifact build is not a real-device usability or peripheral test. iPhone/iPad packaging is not implemented in this milestone.
+
+Local data is not encrypted by this prototype. Protect the device and back up the database with the application closed; automated backup/restore UI, migrations beyond the initial schema, refunds, inventory, and printer/scale drivers remain future work. Never replace or delete a merchant's data file to resolve an error.
+
+## Milestone 1: portable pricing core
+
 
 ## Run locally
 
@@ -43,9 +81,9 @@ A deli quantity of 3.620 g stays 3.620 g even when a nominal 3.500 g price appli
 
 The API accepts explicit grams/milligrams; it does not silently convert the label “ounce” into a weight. Currency codes are syntax-checked, not validated against an online registry. Input precision beyond 1 mg is rejected rather than rounded. More general unit conversion and higher-precision adapters can be added without changing pricing semantics.
 
-## Deliberately outside milestone 1
+## Deliberately outside the pricing-core library (milestone 1)
 
-Register UI, installation packages, SQLite storage, taxes, cash/card tender, discounts beyond configured quantity schedules, finalized-sale persistence, returns/refund execution, inventory balances or lot allocation, device drivers, network sync, customer records, and jurisdiction-specific compliance.
+The pure library does not implement UI, persistence, taxes, tender, refunds, inventory, devices, networking, customers, or compliance. Milestone 2 adds a separate demo UI/service with SQLite and cash-sale recording; all other production capabilities remain out of scope.
 
 The intended application direction is independent Windows/tablet and Apple-device registers with local storage. This crate is isolated from those platform concerns. A successful WebAssembly compile does not provide browser storage, UI bindings, or hardware integration. Native iOS/iPadOS applications still require Apple tooling and platform testing.
 
@@ -57,7 +95,10 @@ The intended application direction is independent Windows/tablet and Apple-devic
 - `docs/acceptance.md`: behavior coverage and design choices.
 - `VALIDATION.md`: commands actually executed and their results.
 - `PROVENANCE.md`: references, selected fixture adaptations, and pending license decision.
-- `.github/workflows/rust.yml`: proposed CI after a repository is selected.
+- `.github/workflows/rust.yml`: cross-platform core CI.
+- `crates/register-service/`: local SQLite service and persistence tests.
+- `apps/register/`: register frontend and native Tauri host.
+- `.github/workflows/register.yml`: service/frontend checks and unsigned Windows development packaging.
 
 ## GitHub handoff
 

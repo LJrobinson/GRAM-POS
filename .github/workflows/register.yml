@@ -1,0 +1,104 @@
+name: Register
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    name: Local service (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: cargo +stable fmt --manifest-path crates/register-service/Cargo.toml -- --check
+      - run: cargo +stable clippy --manifest-path crates/register-service/Cargo.toml --all-targets --all-features --locked -- -D warnings
+      - run: cargo +stable test --manifest-path crates/register-service/Cargo.toml --all-targets --all-features --locked
+
+  frontend:
+    name: Register frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/register
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/register/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  windows:
+    name: Unsigned Windows development package
+    needs: [service, frontend]
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/register
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/register/package-lock.json
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: npm ci
+      - run: npm run build
+      - run: cargo +stable fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - run: cargo +stable clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo +stable test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Build unsigned NSIS installer (with offline WebView2)
+        run: npm run desktop:build -- --ci --no-sign -- --locked
+      - name: Upload unsigned development artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gram-pos-windows-unsigned-${{ github.sha }}
+          path: |
+            apps/register/src-tauri/target/release/gram-pos-register.exe
+            apps/register/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  browser-e2e:
+    name: Real Rust register browser tests
+    needs: [service, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/register
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/register/package-lock.json
+      - run: rustup toolchain install stable --profile minimal
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Upload real register screenshots and test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gram-pos-register-browser-review
+          path: |
+            apps/register/test-results/
+            apps/register/playwright-report/
+          retention-days: 14

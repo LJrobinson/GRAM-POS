@@ -1,0 +1,122 @@
+# GRAM register service: milestone 2
+
+`gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to the unchanged `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
+
+This release is explicitly **demo only**. Fixtures and editable pricing policies are illustrative, not merchant defaults. No tax is calculated. There is no production tax engine, payment processor, inventory movement, refund flow, user/role system, synchronization, fiscal certification, or printer integration. Do not use demo receipts for live trade.
+
+## Rust interface
+
+```rust
+use gram_register_service::RegisterService;
+use serde_json::json;
+let mut register = RegisterService::open("my-selected-demo.sqlite")?;
+let state = register.handle("get_state", json!({}))?;
+```
+
+- `open(path)` initializes a fresh recognized schema but does not seed settings/catalog.
+- `handle(&mut self, command: &str, payload: Value) -> Result<Value, ServiceError>` is used by the desktop host and optional development HTTP adapter.
+- `ServiceError` serializes as `{ "code": "...", "message": "..." }`. Storage error messages omit database paths.
+- Public typed DTOs and methods are available for tests/native callers. The JSON contract lives in `src/dto.rs`.
+- A `Mutex<RegisterService>` is sufficient in a desktop command host. SQLite transactions also protect duplicate checkout across independent connections.
+
+## Exact JSON numbers
+
+Money (minor units), package counts, config revisions, sale IDs, Unix timestamps, allocation remainders, and rational numerators/denominators are decimal **strings**. Weight is a decimal grams **string** with at most three fractional digits, parsed directly by the core into integer milligrams. No floating-point value participates in a quote, checkout, or saved receipt. Small enum versions, currency exponents, and line counts are JSON numbers.
+
+```json
+{
+  "lines": [
+    {"id":"line-a", "sku":"bulk-a", "quantity":{"kind":"measured", "grams":"3.620"}},
+    {"id":"line-b", "sku":"prepack-fixed", "quantity":{"kind":"prepacked", "count":"2"}}
+  ]
+}
+```
+
+Use stable, unique line IDs. Catalog SKU determines kind, declared package content, and pricing eligibility; callers cannot inject a price or package label into a sale line. Actual measured grams, declared content, package count, selected nominal tier, billable grams, and allocated price remain separate in snapshots.
+
+## Commands
+
+| Command | Payload | Result |
+|---|---|---|
+| `get_state` | `{}` | `{configured, config_revision, config, catalog, draft:{lines:[]}}` |
+| `initialize_demo` | `{}` | State; fails `ALREADY_CONFIGURED` rather than overwrite settings |
+| `put_config` | `{config: Config}` | State, after complete validation and revision increment |
+| `quote_cart` | `{lines: CartInputLine[]}` | `Quote` from the Rust core |
+| `save_draft` | `{lines: CartInputLine[]}` | `{saved:true}` |
+| `complete_cash_sale` | Checkout below | `Receipt` |
+| `list_sales` | `{}` | `{sales: SaleSummary[]}`, newest first |
+| `get_receipt` | `{sale_id:"1"}` | Immutable `Receipt` |
+| `get_sale_by_key` | `{idempotency_key:"..."}` | `{receipt: Receipt|null}` |
+
+```json
+{
+  "idempotency_key":"checkout-generated-once-before-submission",
+  "lines":[{"id":"line-a","sku":"bulk-a","quantity":{"kind":"measured","grams":"3.620"}}],
+  "tender_minor":"5000",
+  "expected_total_minor":"3000",
+  "expected_config_revision":"1"
+}
+```
+
+Generate and persist one idempotency key **before** submitting a checkout. Retrying the same complete payload returns its original receipt, even after later policy edits. Reusing a key for a changed payload returns `IDEMPOTENCY_CONFLICT`. Never generate a new key solely because a request timed out or its result was lost.
+
+Finalization begins a SQLite immediate transaction, checks for replay, loads the current settings, recalculates the entire cart with the core, checks expected revision and total, validates tender, writes the immutable sale and receipt, clears the draft, and commits. Any pre-commit failure rolls all those writes back. Tender and change are separate exact integer strings, not sale line adjustments. Stored prices and receipt policy/catalog snapshots do not change when current settings change.
+
+Errors `INVALID_INPUT`, `INVALID_CONFIG`, `NOT_CONFIGURED`, `INSUFFICIENT_TENDER`, `STALE_QUOTE`, and `PRICE_ERROR` insert no new sale in that attempt. An interrupted transport or `STORAGE_ERROR` should be reconciled by retrying **the exact same key and payload**, or querying `get_sale_by_key`. A key conflict indicates an already-used key; retrieve its original receipt rather than assuming no sale exists.
+
+Drafts can contain incomplete quantity text for interrupted typing, but must have valid bounded IDs and supported DTO shapes. Draft recovery is not a quote. Saving configuration can make a recovered draft require correction. Checkout clears the saved draft atomically; host/frontends must serialize autosave and checkout, and not submit delayed old autosaves after a successful sale.
+
+## Settings
+
+All choices are required. There are no implicit revenue-policy defaults. `put_config` validates the entire configuration before replacing the prior revision. Only `schema_version:1`, `demo:true`, and `tax_mode:"demo_no_tax"` are currently accepted.
+
+```json
+{
+  "schema_version":1,
+  "demo":true,
+  "tax_mode":"demo_no_tax",
+  "currency":{"code":"USD","minor_unit_exponent":2},
+  "groups":[{
+    "id":"shared-demo-band",
+    "name":"Demo mix & match",
+    "tiers":[{"nominal_grams":"3.5","tolerance_grams":"0.15","price_minor":"3000"}],
+    "overage_policy":"full_actual_at_tier_rate",
+    "rounding":"half_up",
+    "below_smallest":"proportional_at_smallest_tier",
+    "tolerance_scope":"aggregate_pricing_group"
+  }],
+  "catalog":[{
+    "sku":"bulk-a",
+    "name":"Demo Bulk A",
+    "kind":"measured",
+    "declared_content_grams":null,
+    "pricing":{"kind":"weight_group","group_id":"shared-demo-band"}
+  }]
+}
+```
+
+Supported overage policies: `full_actual_at_tier_rate`, `excess_beyond_tolerance_at_tier_rate`. Supported rounding: `floor`, `ceil`, `half_up`, `half_even`. Supported below-smallest behavior: `proportional_at_smallest_tier`, `reject`. Tolerance is explicitly aggregate-group only. A fixed prepack uses `{"kind":"fixed_unit","unit_price_minor":"3500"}` and must have positive `declared_content_grams`. A prepack joins a weight group only when its catalog pricing explicitly names that group.
+
+## Opt-in development HTTP adapter
+
+The adapter exists only under the `dev-server` Cargo feature. The desktop app does not need a listening server.
+
+```sh
+cargo run -p gram-register-service --features dev-server --bin register-dev-server -- \
+  --db /tmp/gram-explicit-demo.sqlite --port 4174
+```
+
+It binds only `127.0.0.1`, requires an explicit database path, and accepts `POST /api/command` with `Content-Type: application/json`, JSON `{command,payload}`, and at most 1 MiB. Responses are `{ok:true,data}` or `{ok:false,error:{code,message}}`. GET `/health` is the only read endpoint. This is a development adapter, not a production network service.
+
+Host headers must be `127.0.0.1:<backend port>` or `localhost:<backend port>`. Origin headers, when present, must name loopback dev frontend port 5173/4173 or the selected backend port. Other origins are rejected, not reflected in CORS responses. A local Vite `/api` proxy should use `changeOrigin:true`. Missing Origin is supported for the local proxy/CLI, while peer and Host are still checked. No wildcard CORS, remote bind option, credentials, or real payment API are provided.
+
+## Local storage guarantees and limits
+
+SQLite bundled with `rusqlite` provides transactional local storage with foreign keys, full synchronization, an application ID, and schema version 1. Unsupported future schemas and nonempty foreign files are rejected. Sale and receipt update/delete triggers protect immutable records through normal SQL operations; this is not tamper-resistant accounting against a user with arbitrary file access. Keep the database on a local filesystem, not a network share. This milestone does not encrypt or back up the database, handle disk replacement, or implement a migration/recovery utility.
+
+Tests include fresh-file explicit setup, close/reopen, replay after policy edits, conflicting replay, concurrent connections, underpayment/malformed tender no writes, stale quote rejection, injected receipt-write rollback, immutable rows, invalid settings preserving prior settings, future-schema rejection, policy/core agreement, pooled declared-vs-measured weight, and integers beyond JavaScript's safe-number range.
+
+```sh
+cargo test -p gram-register-service --all-features
+cargo clippy -p gram-register-service --all-features --all-targets -- -D warnings
+```
