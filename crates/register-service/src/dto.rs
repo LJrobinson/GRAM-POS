@@ -37,6 +37,8 @@ pub enum CatalogPricing {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogItem {
+    #[serde(default)]
+    pub archived: bool,
     pub sku: String,
     pub name: String,
     pub kind: String,

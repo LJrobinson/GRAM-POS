@@ -428,3 +428,181 @@ fn malformed_cart_and_unknown_command_are_rejected() {
     invalid[0].id = "b".into();
     assert!(service.quote(&invalid).is_err());
 }
+
+#[test]
+fn empty_catalog_can_be_built_and_archived_without_demo_seed() {
+    let db = TestDb::new();
+    let mut service = db.open();
+    let initial = service
+        .initialize_empty(CurrencyDto {
+            code: "CAD".into(),
+            minor_unit_exponent: 2,
+        })
+        .unwrap();
+    assert!(initial.catalog.is_empty());
+    assert!(initial.config.as_ref().unwrap().groups.is_empty());
+    assert!(service.initialize_demo().is_err());
+    let mut config = initial.config.unwrap();
+    config.catalog.push(CatalogItem {
+        archived: false,
+        sku: "my-pack".into(),
+        name: "My pack".into(),
+        kind: "prepacked".into(),
+        declared_content_grams: Some("0.001".into()),
+        pricing: CatalogPricing::FixedUnit {
+            unit_price_minor: "9007199254740993".into(),
+        },
+    });
+    let saved = service.put_config_checked(config.clone(), "1").unwrap();
+    let lines = vec![CartInputLine {
+        id: "one".into(),
+        sku: "my-pack".into(),
+        quantity: InputQuantity::Prepacked { count: "1".into() },
+    }];
+    let quote = service.quote(&lines).unwrap();
+    let request = CheckoutInput {
+        idempotency_key: "custom-sale".into(),
+        lines: lines.clone(),
+        tender_minor: quote.total_minor.clone(),
+        expected_total_minor: quote.total_minor,
+        expected_config_revision: quote.config_revision,
+    };
+    let receipt = service.complete_cash_sale(request.clone()).unwrap();
+    config.catalog[0].name = "Renamed pack".into();
+    config.catalog[0].archived = true;
+    config.catalog[0].pricing = CatalogPricing::FixedUnit {
+        unit_price_minor: "1".into(),
+    };
+    service
+        .put_config_checked(config, &saved.config_revision)
+        .unwrap();
+    service
+        .save_draft(CartInput {
+            lines: lines.clone(),
+        })
+        .unwrap();
+    assert_eq!(service.quote(&lines).unwrap_err().code, "ARCHIVED_PRODUCT");
+    drop(service);
+    let mut reopened = db.open();
+    assert!(reopened.state().unwrap().catalog[0].archived);
+    assert_eq!(reopened.state().unwrap().draft.lines, lines);
+    assert_eq!(reopened.receipt(&receipt.sale_id).unwrap(), receipt);
+    assert_eq!(reopened.complete_cash_sale(request).unwrap(), receipt);
+    assert_eq!(receipt.quote.lines[0].name, "My pack");
+    assert_eq!(receipt.quote.total_minor, "9007199254740993");
+    let state = reopened.state().unwrap();
+    let mut config = state.config.unwrap();
+    config.catalog[0].archived = false;
+    reopened
+        .put_config_checked(config, &state.config_revision)
+        .unwrap();
+    assert_eq!(reopened.quote(&lines).unwrap().total_minor, "1");
+}
+
+#[test]
+fn concurrent_configuration_edits_fail_closed_at_command_boundary() {
+    let db = TestDb::new();
+    let mut first = db.open();
+    first.initialize_demo().unwrap();
+    let mut second = db.open();
+    let initial = second.state().unwrap();
+    let mut edited = initial.config.clone().unwrap();
+    edited.catalog[0].name = "New name".into();
+    first
+        .handle(
+            "put_config",
+            json!({"config":edited,"expected_config_revision":"1"}),
+        )
+        .unwrap();
+    assert_eq!(
+        second
+            .handle(
+                "put_config",
+                json!({"config":initial.config,"expected_config_revision":"1"})
+            )
+            .unwrap_err()
+            .code,
+        "STALE_CONFIG"
+    );
+    assert_eq!(second.state().unwrap().catalog[0].name, "New name");
+    assert_eq!(second.state().unwrap().config_revision, "2");
+    for revision in [
+        json!(2),
+        json!("2.0"),
+        json!("-1"),
+        json!("18446744073709551616"),
+    ] {
+        assert!(second
+            .handle(
+                "put_config",
+                json!({"config":demo_config(),"expected_config_revision":revision})
+            )
+            .is_err());
+    }
+    assert!(second
+        .handle("put_config", json!({"config":demo_config()}))
+        .is_err());
+}
+
+#[test]
+fn malformed_catalog_edits_preserve_previous_state() {
+    let mut service = RegisterService::in_memory().unwrap();
+    let initial = service.initialize_demo().unwrap();
+    let mut cases = vec![];
+    let mut c = demo_config();
+    c.catalog.push(c.catalog[0].clone());
+    cases.push(c);
+    let mut c = demo_config();
+    c.groups.push(c.groups[0].clone());
+    cases.push(c);
+    let mut c = demo_config();
+    let tier = c.groups[0].tiers[0].clone();
+    c.groups[0].tiers.push(tier);
+    cases.push(c);
+    let mut c = demo_config();
+    c.catalog[0].sku = "  bad".into();
+    cases.push(c);
+    let mut c = demo_config();
+    c.catalog[0].name = "\n".into();
+    cases.push(c);
+    let mut c = demo_config();
+    c.catalog[3].declared_content_grams = Some("0.0001".into());
+    cases.push(c);
+    let mut c = demo_config();
+    c.catalog[3].pricing = CatalogPricing::FixedUnit {
+        unit_price_minor: "1e3".into(),
+    };
+    cases.push(c);
+    let mut c = demo_config();
+    c.groups.clear();
+    cases.push(c);
+    let mut c = demo_config();
+    c.groups[0].tiers.clear();
+    cases.push(c);
+    for config in cases {
+        assert_eq!(
+            service.put_config_checked(config, "1").unwrap_err().code,
+            "INVALID_CONFIG"
+        );
+        assert_eq!(service.state().unwrap(), initial);
+    }
+    let mut malformed = serde_json::to_value(demo_config()).unwrap();
+    malformed["catalog"][0]["archived"] = json!("false");
+    assert!(service
+        .handle(
+            "put_config",
+            json!({"config":malformed,"expected_config_revision":"1"})
+        )
+        .is_err());
+}
+
+#[test]
+fn legacy_catalog_without_archive_flag_remains_readable() {
+    let mut raw = serde_json::to_value(demo_config()).unwrap();
+    for item in raw["catalog"].as_array_mut().unwrap() {
+        item.as_object_mut().unwrap().remove("archived");
+    }
+    let config: Config = serde_json::from_value(raw).unwrap();
+    assert!(config.catalog.iter().all(|item| !item.archived));
+    validate_config(&config).unwrap();
+}

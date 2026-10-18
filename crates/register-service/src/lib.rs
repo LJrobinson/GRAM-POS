@@ -4,7 +4,9 @@
 #![forbid(unsafe_code)]
 
 mod dto;
+mod export;
 pub use dto::*;
+pub use export::ExportFile;
 
 use gram_pos_core as core;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -60,6 +62,12 @@ pub struct RegisterService {
 #[serde(deny_unknown_fields)]
 struct ConfigInput {
     config: Config,
+    expected_config_revision: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitializeInput {
+    currency: CurrencyDto,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -136,9 +144,21 @@ impl RegisterService {
                 let _: EmptyInput = decode(payload)?;
                 encode(self.initialize_demo()?)
             }
+            "initialize_empty" => {
+                let input: InitializeInput = decode(payload)?;
+                encode(self.initialize_empty(input.currency)?)
+            }
+            "export_sales" => {
+                let _: EmptyInput = decode(payload)?;
+                encode(self.export_sales()?)
+            }
+            "export_backup" => {
+                let _: EmptyInput = decode(payload)?;
+                encode(self.export_backup()?)
+            }
             "put_config" => {
                 let input: ConfigInput = decode(payload)?;
-                encode(self.put_config(input.config)?)
+                encode(self.put_config_checked(input.config, &input.expected_config_revision)?)
             }
             "quote_cart" => {
                 let input: CartInput = decode(payload)?;
@@ -204,7 +224,21 @@ impl RegisterService {
     }
 
     pub fn initialize_demo(&mut self) -> Result<State, ServiceError> {
-        let config = demo_config();
+        self.initialize(demo_config())
+    }
+
+    pub fn initialize_empty(&mut self, currency: CurrencyDto) -> Result<State, ServiceError> {
+        self.initialize(Config {
+            schema_version: 1,
+            demo: true,
+            tax_mode: "demo_no_tax".into(),
+            currency,
+            groups: vec![],
+            catalog: vec![],
+        })
+    }
+
+    fn initialize(&mut self, config: Config) -> Result<State, ServiceError> {
         validate_config(&config)?;
         let tx = self
             .conn
@@ -221,6 +255,23 @@ impl RegisterService {
     }
 
     pub fn put_config(&mut self, config: Config) -> Result<State, ServiceError> {
+        self.write_config(config, None)
+    }
+
+    pub fn put_config_checked(
+        &mut self,
+        config: Config,
+        expected_revision: &str,
+    ) -> Result<State, ServiceError> {
+        let expected = parse_integer(expected_revision, "Expected configuration revision")?;
+        self.write_config(config, Some(expected))
+    }
+
+    fn write_config(
+        &mut self,
+        config: Config,
+        expected: Option<u64>,
+    ) -> Result<State, ServiceError> {
         validate_config(&config)?;
         let tx = self
             .conn
@@ -230,6 +281,9 @@ impl RegisterService {
                 r.get(0)
             })
             .optional()?;
+        if expected.is_some_and(|value| value != previous.unwrap_or(0) as u64) {
+            return Err(ServiceError::new("STALE_CONFIG", "Configuration changed in another window. Reload before editing; your changes were not saved."));
+        }
         let revision = previous.unwrap_or(0).checked_add(1).ok_or_else(|| {
             ServiceError::new("INVALID_CONFIG", "Configuration revision limit reached.")
         })?;
@@ -404,7 +458,7 @@ fn read_config(conn: &Connection) -> Result<(i64, Config), ServiceError> {
     read_config_optional(conn)?.ok_or_else(|| {
         ServiceError::new(
             "NOT_CONFIGURED",
-            "Load the explicit demo catalog and policies before quoting a sale.",
+            "Set up a catalog or load the explicit demo before quoting a sale.",
         )
     })
 }
@@ -553,10 +607,10 @@ fn validate_config_inner(config: &Config) -> Result<(), ServiceError> {
     if config.schema_version != 1 || !config.demo || config.tax_mode != "demo_no_tax" {
         return Err(ServiceError::new("INVALID_CONFIG", "This release supports explicit demo configuration only, with no tax calculated. Production sales are not enabled."));
     }
-    if config.groups.len() > 100 || config.catalog.len() > 1000 || config.catalog.is_empty() {
+    if config.groups.len() > 100 || config.catalog.len() > 1000 {
         return Err(ServiceError::new(
             "INVALID_CONFIG",
-            "Use 1–1000 catalog items and at most 100 price groups.",
+            "Use 0–1000 catalog items and at most 100 price groups.",
         ));
     }
     let cur = currency(&config.currency)?;
@@ -645,6 +699,15 @@ fn quote_using_config(
                     format!("Unknown catalog SKU: {}", line.sku),
                 )
             })?;
+        if item.archived {
+            return Err(ServiceError::new(
+                "ARCHIVED_PRODUCT",
+                format!(
+                    "{} is archived. Remove it from the cart or unarchive it before selling.",
+                    item.name
+                ),
+            ));
+        }
         let quantity = match &line.quantity {
             InputQuantity::Measured { grams } if item.kind == "measured" => {
                 core::Quantity::Measured {
@@ -803,6 +866,7 @@ pub fn demo_config() -> Config {
         }],
         catalog: vec![
             CatalogItem {
+                archived: false,
                 sku: "bulk-a".into(),
                 name: "Demo Bulk A".into(),
                 kind: "measured".into(),
@@ -812,6 +876,7 @@ pub fn demo_config() -> Config {
                 },
             },
             CatalogItem {
+                archived: false,
                 sku: "bulk-b".into(),
                 name: "Demo Bulk B".into(),
                 kind: "measured".into(),
@@ -821,6 +886,7 @@ pub fn demo_config() -> Config {
                 },
             },
             CatalogItem {
+                archived: false,
                 sku: "prepack-mix".into(),
                 name: "Demo 3.5 g Mix Pack".into(),
                 kind: "prepacked".into(),
@@ -830,6 +896,7 @@ pub fn demo_config() -> Config {
                 },
             },
             CatalogItem {
+                archived: false,
                 sku: "prepack-fixed".into(),
                 name: "Demo 3.5 g Fixed Pack".into(),
                 kind: "prepacked".into(),

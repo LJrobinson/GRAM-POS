@@ -1,0 +1,41 @@
+import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { command } from './api';
+import { newProduct } from './catalog';
+import type { CatalogItem, Config, Currency } from './types';
+
+export function BlankSetup({ loading, onInitialize }: { loading: boolean; onInitialize: (currency: Currency) => void }) {
+  const [code, setCode] = useState('');
+  const [exponent, setExponent] = useState('');
+  return <details className="blank-setup"><summary>Start with an empty catalog instead</summary><p>A blank training workspace, without sample products or pricing. Choose the currency format explicitly; tax and compliance remain unconfigured.</p><div className="editor-grid"><label>Currency code<input maxLength={3} placeholder="e.g. USD" value={code} onChange={e => setCode(e.target.value.toUpperCase())}/></label><label>Currency decimal places<select aria-label="Currency decimal places" value={exponent} onChange={e => setExponent(e.target.value)}><option value="">Choose precision</option>{[0, 1, 2, 3, 4, 5, 6].map(value => <option key={value} value={value}>{value}</option>)}</select></label></div><button className="secondary" disabled={loading || !/^[A-Z]{3}$/.test(code) || !exponent} onClick={() => onInitialize({ code, minor_unit_exponent: Number(exponent) })}>Create empty training register</button></details>;
+}
+
+export function CatalogEditor({ config, savedProductCount, onChange }: { config: Config; savedProductCount: number; onChange: (config: Config) => void }) {
+  const update = (index: number, next: CatalogItem) => onChange({ ...config, catalog: config.catalog.map((item, i) => i === index ? next : item) });
+  return <section className="catalog-editor"><div className="settings-section-heading"><h2>Products</h2><button className="secondary" onClick={() => onChange({ ...config, catalog: [...config.catalog, newProduct()] })}>Add product</button></div><p className="input-help">Changes apply together when you save configuration. Archive a product to remove it from the sale picker without changing saved receipts. SKU identifies a product; changing it creates a new identity for future sales.</p>{!config.catalog.length && <p>No products yet. Add a product and, for measured goods, a pricing group below.</p>}{config.catalog.map((item, index) => <details className={`settings-card product-editor ${item.archived ? 'archived-product' : ''}`} key={index} open><summary>{item.name || `New product ${index + 1}`} · {item.archived ? 'Archived' : 'Active'}</summary><div className="editor-grid"><label>Product name<input aria-label={`Product name ${index + 1}`} value={item.name} onChange={e => update(index, { ...item, name: e.target.value })}/></label><label>SKU<input aria-label={`SKU ${index + 1}`} value={item.sku} onChange={e => update(index, { ...item, sku: e.target.value })}/></label><label>Product type<select aria-label={`Product type ${index + 1}`} value={item.kind} onChange={e => { const kind = e.target.value as CatalogItem['kind']; update(index, { ...item, kind, declared_content_grams: kind === 'measured' ? null : '', pricing: kind === 'measured' ? { kind: 'weight_group', group_id: '' } : { kind: 'fixed_unit', unit_price_minor: '' } }); }}><option value="measured">Measured · actual grams</option><option value="prepacked">Prepacked · whole packages</option></select></label>{item.kind === 'prepacked' && <label>Declared grams per package<input aria-label={`Declared grams per package ${index + 1}`} inputMode="decimal" value={item.declared_content_grams || ''} onChange={e => update(index, { ...item, declared_content_grams: e.target.value })}/></label>}<label>Pricing method<select aria-label={`Pricing method ${index + 1}`} value={item.pricing.kind} onChange={e => update(index, { ...item, pricing: e.target.value === 'fixed_unit' ? { kind: 'fixed_unit', unit_price_minor: '' } : { kind: 'weight_group', group_id: '' } })}><option value="weight_group">Shared weight pricing group</option>{item.kind === 'prepacked' && <option value="fixed_unit">Fixed price per package</option>}</select></label>{item.pricing.kind === 'weight_group' ? <label>Pricing group<select aria-label={`Pricing group ${index + 1}`} value={item.pricing.group_id} onChange={e => update(index, { ...item, pricing: { kind: 'weight_group', group_id: e.target.value } })}><option value="">Choose a group</option>{config.groups.filter(group => group.id).map((group, i) => <option key={i} value={group.id}>{group.name || group.id}</option>)}</select></label> : <label>Package price ({config.currency.code} minor units)<input aria-label={`Package price ${index + 1}`} inputMode="numeric" value={item.pricing.unit_price_minor} onChange={e => update(index, { ...item, pricing: { kind: 'fixed_unit', unit_price_minor: e.target.value } })}/></label>}</div><p className="input-help">{item.kind === 'prepacked' ? 'Declared content is not measured weight. Joining a shared group explicitly includes package content in its weight pricing.' : 'Measured products require a shared weight pricing group.'} Weights accept at most 3 decimal places. Prices use whole minor units, never floating-point currency.</p><button className="secondary" onClick={() => update(index, { ...item, archived: !item.archived })}>{item.archived ? 'Unarchive' : 'Archive'} product {index + 1}</button>{index >= savedProductCount && <button className="text-button" onClick={() => onChange({ ...config, catalog: config.catalog.filter((_, i) => i !== index) })}>Discard new product {index + 1}</button>}</details>)}</section>;
+}
+
+export type ExportFile = { filename: string; media_type: string; content: string };
+export function ExportPanel({ disabled, hasUnsavedChanges }: { disabled: boolean; hasUnsavedChanges: boolean }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const save = async (kind: 'backup' | 'sales') => {
+    if (busy) return;
+    setBusy(kind); setError(''); setNotice('');
+    try {
+      if ('__TAURI_INTERNALS__' in window) {
+        const path = await invoke<string | null>('save_export', { kind });
+        setNotice(path ? `Export saved to ${path}` : 'Export cancelled. No file was saved.');
+      } else {
+        const file = await command<ExportFile>(kind === 'backup' ? 'export_backup' : 'export_sales');
+        const url = URL.createObjectURL(new Blob([file.content], { type: file.media_type }));
+        const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.filename; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setNotice('Download requested. Check your browser downloads and keep the file somewhere safe.');
+      }
+    } catch (error) { setError(error instanceof Error ? error.message : error && typeof error === 'object' && 'message' in error ? String(error.message) : typeof error === 'string' ? error : 'Could not export local data. Please try again.'); }
+    finally { setBusy(''); }
+  };
+  return <section className="settings-card export-panel"><h2>Local backups & exports</h2><p>Portable backup: a consistent JSON snapshot of saved configuration, draft, and sales records. Sales export: saved receipts only, for reporting, not a full backup.</p><p>Files are unencrypted. Keep them private and store a copy off this device. No in-app restore is available. See the repository backup/recovery instructions: recovery creates a new file and never overwrites existing data. Exports are not a tax or compliance filing.</p>{hasUnsavedChanges && <p className="warning-banner">Exports contain saved data only. Save your configuration first to include these edits.</p>}<div className="configuration-actions"><button className="secondary" disabled={disabled || !!busy} onClick={() => void save('backup')}>{busy === 'backup' ? 'Preparing backup…' : 'Download portable backup'}</button><button className="secondary" disabled={disabled || !!busy} onClick={() => void save('sales')}>{busy === 'sales' ? 'Preparing sales…' : 'Export sales JSON'}</button></div>{notice && <p role="status" className="success-banner">{notice}</p>}{error && <p role="alert" className="error-banner">{error}</p>}</section>;
+}
