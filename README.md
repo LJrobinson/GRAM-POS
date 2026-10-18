@@ -6,7 +6,7 @@ Repository: https://github.com/LJrobinson/GRAM-POS.
 
 ## See the prototype
 
-Real browser screenshots from the [passing milestone-4 browser CI job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) at commit `53332e4`, using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.
+The original register/catalog/cash-session screenshots below come from the [passing milestone-4 browser CI job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) at commit `53332e4`, using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.
 
 ### Register
 
@@ -56,6 +56,39 @@ Review the original full-sale refund with a reason, then compare counted cash wi
 
 </details>
 
+### Printable receipts and sales reports (milestone 5)
+
+Original captures from the [passing milestone-5 real-browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39177654986/job/117823723881), commit `5309fc2`. This run used the Rust service and SQLite, verified the print-only DOM, and generated the actual [sample receipt PDF](docs/screenshots/receipt-print.pdf). The PDF was rendered and visually inspected; it is not a physical-printer or native-device test.
+
+<details>
+<summary>View UTC sales, separate refunds and exact net totals</summary>
+
+![GRAM reports with explicit UTC date boundaries, separate gross sales and refunds, and net totals](docs/screenshots/sales-reports-desktop.png)
+
+</details>
+
+<details>
+<summary>View the mobile reporting layout</summary>
+
+The activity table scrolls horizontally; the summary remains readable without sideways page scrolling.
+
+![GRAM mobile reports with UTC dates and distinct sales, refund and net cards](docs/screenshots/sales-reports-phone.png)
+
+</details>
+
+<details>
+<summary>View the saved receipt preview and isolated print layout</summary>
+
+The scrollable preview uses the original sale snapshot even after product edits and a full refund. Current refund information stays separate from the original printout.
+
+![GRAM saved receipt preview preserving original names, measured and declared quantities, and exact total](docs/screenshots/receipt-preview-desktop.png)
+
+The print layout contains only the selected original receipt, not register controls or another sale. Paper and margins remain user-selected in the print dialog.
+
+![GRAM print-only receipt layout with original quantities, total, tender and change](docs/screenshots/receipt-print.png)
+
+</details>
+
 ## Milestone 5: printable receipts and date-filtered reports
 
 Version **0.5.0** adds a focused, read-only view of the saved record:
@@ -64,7 +97,7 @@ Version **0.5.0** adds a focused, read-only view of the saved record:
 - Report sales and refunds by their own event dates with explicit UTC start-inclusive/end-exclusive boundaries. Gross, refunds and net stay separate for every currency and precision; cash float/tender/change are not revenue.
 - Export formula-defended UTF-8 CSV with exact minor-unit amounts, summary rows and event rows. CSV is a report, not a recovery backup.
 
-See [receipts and reports](docs/receipts-and-reports.md) for dates, spreadsheet import guidance and printing limits. Printing opens a user-controlled dialog; no silent printing or printer drivers are added. Physical printers and native printing remain unverified. New screenshots will be added only from a passing real-browser run; the screenshots above remain identified milestone-4 captures.
+See [receipts and reports](docs/receipts-and-reports.md) for dates, spreadsheet import guidance and printing limits. Printing opens a user-controlled dialog; no silent printing or printer drivers are added. Physical printers and native printing remain unverified. The milestone-5 captures above come from a passing real-browser run; earlier register/catalog/cash-session captures remain labeled milestone 4.
 
 ## Milestone 4: cash sessions and full-sale refunds
 
@@ -80,7 +113,7 @@ Sessions snapshot currency and precision. Close the session before changing curr
 
 The service explicitly migrates schema 1 stores to schema 2 while leaving their receipt/request bytes intact. The recovery tool accepts older v1 backups as legacy history and new v2 backups with the cash ledger. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
 
-The screenshots above are original milestone-4 browser captures from the real Rust/SQLite test run. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
+The earlier register/catalog/cash-session screenshots are original milestone-4 browser captures; the receipt/report section is labeled milestone 5. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
 
 ## Milestone 3: your catalog, local exports
 
