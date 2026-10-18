@@ -4,6 +4,33 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## See the prototype
+
+Real browser screenshots from the [passing milestone-3 CI run](https://github.com/LJrobinson/GRAM-POS/actions/runs/39166231704), using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.
+
+### Register
+
+Measured deli lines and whole prepackages in one cart, with Rust-computed pricing and separate recorded quantities.
+
+![GRAM register with measured goods, prepackages, and exact cart pricing](docs/screenshots/register-desktop.png)
+
+### Catalog and pricing
+
+Create products, archive them, and configure shared pricing groups and explicit tier policies. Expand the full-page screenshot to inspect the editor.
+
+<details>
+<summary>View the full catalog and pricing editor</summary>
+
+![GRAM catalog editor showing products, package pricing, and shared weight pricing groups](docs/screenshots/catalog-editor-desktop.png)
+
+</details>
+
+### Local backup and sales export
+
+Download a consistent portable backup or a separate sales JSON report. Files are unencrypted; offline recovery creates a new database rather than replacing the live store.
+
+![GRAM backup and sales export panel, including privacy and recovery guidance](docs/screenshots/backup-export-panel.png)
+
 ## Milestone 3: your catalog, local exports
 
 The register remains a **prototype / demo only**, now with a user-managed catalog instead of a mandatory seed catalog:
