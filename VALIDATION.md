@@ -1,3 +1,34 @@
+# Milestone 4 validation
+
+Implemented from main `ed648bed085606483d528381b22093b619442dcd` on 2026-10-18. Every tracked local source/artifact was verified against the published Git tree before editing; no divergent files were overwritten.
+
+## Executed locally
+
+- Frontend `npm run typecheck`: passed.
+- Frontend `npm test`: 21 tests passed, including exact signed drawer variance, currency/precision matching and unchanged saved mutation keys on reload.
+- Frontend `npm run build`: passed for app version 0.4.0.
+- Native host formatting and locked no-dependency metadata: passed.
+- Rust stable 1.99.1 `cargo test --workspace --all-targets --all-features --locked`: 84 tests passed (43 core, 18 persistence/catalog, 10 cash ledger, 7 existing export/recovery, 6 ledger export/recovery).
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+- `cargo test --workspace --doc --locked`: passed, no documentation test cases.
+- `cargo run --example pricing_demo --locked`: passed.
+- `npx playwright test --list`: discovered all 4 browser scenarios; discovery is not runtime execution.
+
+Ledger coverage includes exact refunds after catalog edits, changed-key double-refund rejection, concurrent refund attempts, stale/retried closes, sale-vs-close serialization, rollback when association insertion fails, immutable SQL records, restart, currency/precision/session guards, very large and negative drawer totals, schema-1 migration/legacy replay, malformed migration rollback, v1 restore, v2 raw-byte roundtrips and sequence retention, corrupt links/totals/currencies, and clock rollback. Review identified that wall-clock ordering must not control backup validity; regression now verifies nonmonotonic timestamps and future-dated legacy receipts remain exportable/recoverable while structural session order is enforced.
+
+## Runtime evidence boundary
+
+No milestone-4 browser screenshots or native Windows runtime pass is claimed locally. The previously verified environment lacks native GTK/GObject dependencies and browser socket execution; no repeat escalation was attempted. The Register CI workflow runs real-Rust browser E2E and native Windows checks/unsigned packaging. New browser coverage captures full-refund review, cash-session closing review, and mobile session history/open state; it exercises lost-response/reload recovery for opening, refund and closing, plus repeated refund clicks. The original mixed-cart checkout/catalog/export checks remain. The blank-onboarding case uses mocked transport; ledger cases use the real Rust adapter.
+
+## Verified milestone-4 browser CI
+
+At commit `53332e4cf3cd2edb1cc7b20a2376cecfca189c85`, [Register browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) passed all four scenarios. Its original screenshots were downloaded and visually inspected for README; no generated mockup or pixel edits were substituted. The initial run exposed unnamed icon-only mobile navigation; explicit accessible labels corrected it, and the same mobile flow now passes.
+
+Core CI at this commit passed Linux/macOS/Windows, Rust 1.70 and Wasm checks. Frontend and service checks passed on Linux and Windows. Native Windows packaging was still running when this screenshot documentation was prepared; the final PR-head workflow result must be checked separately. Successful unsigned installer builds do not establish real-device usability, peripherals, production payments/tax/compliance, or independent security certification.
+
+---
+
 # Milestone 3 validation
 
 Validated locally on 2026-10-18 in Linux x86_64, against the milestone-2 main source at `b61735349657c16480e0cc92204144c5dceec30d`. The existing source export was compared with the published milestone-2 text files before changes; no divergent source was found.

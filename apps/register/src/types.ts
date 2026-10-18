@@ -10,4 +10,4 @@ export type PricedGroup = { group_id: string; actual_measured_grams: string; dec
 export type Quote = { config_revision: string; currency: Currency; lines: PricedLine[]; groups: PricedGroup[]; total_minor: string; tax_mode: 'demo_no_tax' };
 export type Receipt = { sale_id: string; receipt_number: string; created_at_unix: string; quote: Quote; tender_minor: string; change_minor: string; payment_method: 'cash'; demo: true };
 export type SaleSummary = { sale_id: string; receipt_number: string; created_at_unix: string; total_minor: string; tender_minor: string; change_minor: string; currency: Currency; line_count: number };
-export type CheckoutPayload = { idempotency_key: string; lines: CartLine[]; tender_minor: string; expected_total_minor: string; expected_config_revision: string };
+export type CheckoutPayload = { idempotency_key: string; lines: CartLine[]; tender_minor: string; expected_total_minor: string; expected_config_revision: string; expected_session_id?: string; expected_currency?: Currency };

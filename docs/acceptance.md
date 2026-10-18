@@ -192,3 +192,16 @@ explanations support later adapters; they are not persistent inventory, sale
 records, receipts, compliance decisions, payment authorization, or executable
 refunds. No register UI, database, tax engine, device driver, platform installer,
 or external publication is part of these acceptance results.
+
+
+## Milestone 4: local cash ledger acceptance
+
+- An explicit opening float and snapshotted currency/precision precede new cash sales.
+- Sales and full refunds attach atomically to the active session; closed summaries cannot be amended.
+- Cash sales contribute their original total (tender minus change), not gross tender.
+- A refund references its immutable original receipt, exact amount and currency with a required reason. Catalog edits do not reprice it, another refund is rejected, and stock changes are never inferred.
+- Refunds of earlier-session or legacy sales reduce only the current matching-currency drawer.
+- Counted cash and exact signed variance are frozen on close. A stale reviewed movement count cannot close over concurrent activity.
+- Request replay returns the original result after later configuration/session changes; changed payload reuse fails.
+- Schema-1 receipts/requests remain byte-preserved legacy records. Portable v1 backups still restore, while v2 includes ledger and relationships.
+- No claim of live payment processing, inventory, production tax/fiscal compliance, or physical cash verification is made.

@@ -83,3 +83,10 @@ Installer, capability, and CSP configuration follows the official
 [Tauri capabilities](https://v2.tauri.app/security/capabilities/), and
 [CSP](https://v2.tauri.app/security/csp/) documentation. The simple icon artwork
 is original project geometry, with editable source in `icons/icon.svg`.
+
+
+Version 0.4 adds local training cash sessions and full-sale refunds. On first
+open, recognized schema-1 databases migrate transactionally to schema 2 without
+rewriting old receipts. Keep a pre-upgrade backup and do not reopen the upgraded
+file with an older app. The existing bounded IPC command handles the ledger;
+no new filesystem/network permissions or payment integration are added.

@@ -1,8 +1,8 @@
-# GRAM register service: milestone 3
+# GRAM register service: milestone 4
 
 `gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to the unchanged `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
 
-This release is explicitly **demo only**. Fixtures and editable pricing policies are illustrative, not merchant defaults. No tax is calculated. There is no production tax engine, payment processor, inventory movement, refund flow, user/role system, synchronization, fiscal certification, or printer integration. Do not use demo receipts for live trade.
+This release is explicitly **demo only**. Fixtures and editable pricing policies are illustrative, not merchant defaults. No tax is calculated. There is no production tax engine, payment processor, inventory movement, partial refunds, user/role system, synchronization, fiscal certification, or printer integration. Do not use demo receipts for live trade.
 
 ## Rust interface
 
@@ -57,7 +57,9 @@ Use stable, unique line IDs. Catalog SKU determines kind, declared package conte
   "lines":[{"id":"line-a","sku":"bulk-a","quantity":{"kind":"measured","grams":"3.620"}}],
   "tender_minor":"5000",
   "expected_total_minor":"3000",
-  "expected_config_revision":"1"
+  "expected_config_revision":"1",
+  "expected_session_id":"1",
+  "expected_currency":{"code":"USD","minor_unit_exponent":2}
 }
 ```
 
@@ -116,7 +118,7 @@ Host headers must be `127.0.0.1:<backend port>` or `localhost:<backend port>`. O
 
 ## Local storage guarantees and limits
 
-SQLite bundled with `rusqlite` provides transactional local storage with foreign keys, full synchronization, an application ID, and schema version 1. Unsupported future schemas and nonempty foreign files are rejected. Sale and receipt update/delete triggers protect immutable records through normal SQL operations; this is not tamper-resistant accounting against a user with arbitrary file access. Keep the database on a local filesystem, not a network share. Exports are unencrypted logical snapshots, not a synchronization protocol or tamper-resistant accounting archive. See [backup and recovery](../../docs/backup.md) for the versioned format, recovery tool, and restrictions. No migration to a future schema is implied.
+SQLite bundled with `rusqlite` provides transactional local storage with foreign keys, full synchronization, an application ID, and schema version 2 with an explicit migration from version 1. Unsupported future schemas and nonempty foreign files are rejected. Sale and receipt update/delete triggers protect immutable records through normal SQL operations; this is not tamper-resistant accounting against a user with arbitrary file access. Keep the database on a local filesystem, not a network share. Exports are unencrypted logical snapshots, not a synchronization protocol or tamper-resistant accounting archive. See [backup and recovery](../../docs/backup.md) for the versioned format, recovery tool, and restrictions. Older app versions must not reopen upgraded files.
 
 Tests include fresh-file explicit setup, close/reopen, replay after policy edits, conflicting replay, concurrent connections, underpayment/malformed tender no writes, stale quote rejection, injected receipt-write rollback, immutable rows, invalid settings preserving prior settings, future-schema rejection, policy/core agreement, pooled declared-vs-measured weight, and integers beyond JavaScript's safe-number range.
 
@@ -124,3 +126,24 @@ Tests include fresh-file explicit setup, close/reopen, replay after policy edits
 cargo test -p gram-register-service --all-features
 cargo clippy -p gram-register-service --all-features --all-targets -- -D warnings
 ```
+
+
+## Cash ledger commands (v0.4)
+
+All new cash activity requires an open session. Receipts remain unchanged; sale/session association is a separate immutable relation. Old schema-1 sales have no session and never contribute to a newly opened drawer.
+
+- `get_cash_ledger {}` returns `{active_session, sessions, refunds, sale_sessions}`. Active session is null when closed. `sale_sessions` contains `{sale_id,session_id}` mappings.
+- `open_cash_session {idempotency_key, opening_float_minor, expected_currency}` returns the created session. Persist this key and exact payload before sending; replay returns that same session, even after it closes.
+- `close_cash_session {session_id, counted_minor, expected_movement_count}` returns a permanent closed summary. The movement count from the reviewed ledger guards against a racing sale/refund. A completed close can be replayed with the same count; it cannot be edited.
+- `refund_cash_sale {idempotency_key, sale_id, reason, expected_session_id, expected_currency}` records the original full receipt total in the matching current session, with no catalog repricing or stock movement. A second refund for the same sale is rejected.
+- `get_refund_by_key {idempotency_key}` returns `{refund: RefundReceipt|null}` for uncertain-response recovery.
+
+`CashSession` contains `session_id`, `opened_at_unix`, `currency`, `opening_float_minor`, `sales_total_minor`, `refunds_total_minor`, `expected_cash_minor`, `movement_count`, nullable `closed_at_unix`, nullable `counted_minor`, and nullable `variance_minor`. IDs, counts, timestamps and money are exact strings. Expected cash and variance may be signed. Expected cash = opening float + sales − refunds; variance = counted − expected.
+
+`RefundReceipt` contains `refund_id`, `refund_number`, `created_at_unix`, `sale_id`, `original_receipt_number`, `session_id`, `reason`, `amount_minor`, `currency`, and `payment_method: "cash"`. Refund amounts are nonnegative original totals, deducted once in cash reconciliation. Original sale receipts are never removed or rewritten.
+
+Session currency and minor-unit precision are frozen at opening. Configuration changes to currency/precision while open, and refunds of receipts in a different currency/precision, are rejected. Refunds of old-session/legacy receipts affect only the currently open matching-currency session. Session close and all cash mutations use immediate SQLite transactions. The ledger is local logical consistency, not tamper resistance against arbitrary database access.
+
+See [cash-session workflow](../../docs/cash-sessions.md) for operator and retry guidance.
+
+New frontend cash-sale/refund requests bind `expected_session_id` and `expected_currency`; opening requests bind `expected_currency`. The optional JSON fields preserve deserialization and exact replay of old checkout requests, not a recommendation to omit guards in new clients. An uncompleted legacy pending checkout requires renewed review; completed legacy keys can still retrieve the original receipt.

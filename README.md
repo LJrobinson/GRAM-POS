@@ -6,7 +6,7 @@ Repository: https://github.com/LJrobinson/GRAM-POS.
 
 ## See the prototype
 
-Real browser screenshots from the [passing milestone-3 CI run](https://github.com/LJrobinson/GRAM-POS/actions/runs/39166231704), using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.
+Real browser screenshots from the [passing milestone-4 browser CI job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) at commit `53332e4`, using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.
 
 ### Register
 
@@ -30,6 +30,47 @@ Create products, archive them, and configure shared pricing groups and explicit 
 Download a consistent portable backup or a separate sales JSON report. Files are unencrypted; offline recovery creates a new database rather than replacing the live store.
 
 ![GRAM backup and sales export panel, including privacy and recovery guidance](docs/screenshots/backup-export-panel.png)
+
+### Cash refunds and drawer reconciliation
+
+Review the original full-sale refund with a reason, then compare counted cash with expected cash before permanently closing the drawer. No original receipt is rewritten and no stock return is inferred.
+
+<details>
+<summary>View full-receipt refund confirmation</summary>
+
+![GRAM full-receipt refund review with original receipt, exact total, and reason](docs/screenshots/refund-confirmation.png)
+
+</details>
+
+<details>
+<summary>View cash-session closing count and variance</summary>
+
+![GRAM close-session review showing starting float, sales, refunds, expected cash, counted cash and variance](docs/screenshots/cash-session-close.png)
+
+</details>
+
+<details>
+<summary>View mobile cash-session history</summary>
+
+![GRAM mobile cash-session history with permanent closing variance and refund record](docs/screenshots/cash-session-history-phone.png)
+
+</details>
+
+## Milestone 4: cash sessions and full-sale refunds
+
+Version **0.4.0** adds a training-only cash ledger without rewriting any sale:
+
+- Open a cash session with an explicit starting float before a new cash sale.
+- Review expected cash as opening float plus recorded sales minus recorded refunds. Tender/change are not double-counted.
+- Record a full-sale cash refund from the original receipt, with a required reason and the exact original total, even after catalog edits. Only one refund per sale is allowed. No stock return is inferred.
+- Count the drawer, review the variance, then close the session permanently. Sales/refunds cannot be added to closed sessions. Historical refunds belong to the currently open session, not the original closed drawer.
+- Preserve original receipts, session history, refund records, and retry identities through restart and portable backup/recovery.
+
+Sessions snapshot currency and precision. Close the session before changing currency; refunds must match the active session's currency and precision. Old receipts without a session stay visible as legacy history and are never added to a new drawer's sales. Partial refunds, cash pay-ins/pay-outs, live payment refunds, inventory adjustments, user authentication, taxes, synchronization, and production/fiscal certification are not implemented.
+
+The service explicitly migrates schema 1 stores to schema 2 while leaving their receipt/request bytes intact. The recovery tool accepts older v1 backups as legacy history and new v2 backups with the cash ledger. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
+
+The screenshots above are original milestone-4 browser captures from the real Rust/SQLite test run. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
 
 ## Milestone 3: your catalog, local exports
 
@@ -76,7 +117,7 @@ Open the displayed loopback Vite URL. Choose an empty catalog and currency, or *
 
 See [native setup and packaging](apps/register/src-tauri/README.md). The included Register workflow tests the service and frontend, then builds an **unsigned Windows development installer**. A successful artifact build is not a real-device usability or peripheral test. iPhone/iPad packaging is not implemented in this milestone.
 
-Local data and exported files are not encrypted by this prototype. Protect the device and keep a separate copy of backups. Use the snapshot export instead of copying an active SQLite file. Recovery is an explicit offline operation to a new file, not an in-app overwrite. Migrations beyond the initial schema, refunds, inventory, and printer/scale drivers remain future work. Never replace or delete a merchant's data file to resolve an error.
+Local data and exported files are not encrypted by this prototype. Protect the device and keep a separate copy of backups. Use the snapshot export instead of copying an active SQLite file. Recovery is an explicit offline operation to a new file, not an in-app overwrite. Inventory and printer/scale drivers remain future work. Schema-1 stores migrate explicitly; incompatible future schemas are rejected. Never replace or delete a merchant's data file to resolve an error.
 
 ## Milestone 1: portable pricing core
 
