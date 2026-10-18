@@ -1,8 +1,20 @@
 # GRAM POS
 
-**GRAM POS** is a configurable, local-first point-of-sale project. The portable `gram-pos-core` Rust library powers a native register prototype. A portable, dependency-free Rust pricing library for LJ Robinson's configurable, open-source POS project. The first use case is deli and prepacked flower; the domain is deliberately generic.
+**GRAM POS** is a configurable, local-first point-of-sale project. The portable `gram-pos-core` Rust library powers a native register prototype. The portable pricing core is dependency-free. The first use case is deli and prepacked flower; the domain is deliberately generic.
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
+
+## Milestone 3: your catalog, local exports
+
+The register remains a **prototype / demo only**, now with a user-managed catalog instead of a mandatory seed catalog:
+
+- Start an empty register with an explicit currency, or deliberately load illustrative demo data.
+- Create and edit measured products and prepackages, fixed package prices, and shared weight-pricing groups with editable tiers and explicit policies.
+- Archive or unarchive products without changing completed receipts. Archived products cannot be quoted or sold; saved drafts remain visible for correction.
+- Save the whole configuration atomically. Duplicate identifiers, invalid quantities/prices, missing groups, and malformed policies are rejected by Rust. A revision check prevents one window silently overwriting another's configuration.
+- Download exact, versioned sales JSON and a consistent logical backup of the local store. The backup includes catalog, settings, draft, immutable sales/receipts, and retry keys. See [backup and recovery](docs/backup.md) for formats, privacy, and safe recovery to a new file.
+
+Changing a product name, price, archive state, group, or currency affects future quotes only. Existing receipt snapshots stay unchanged. Empty catalogs are valid; they cannot complete a sale until products are configured. This milestone adds no inventory, tax, live payments, compliance, or device synchronization.
 
 ## Milestone 2: demo register
 
@@ -31,13 +43,13 @@ cd apps/register
 npm ci
 npm run dev
 ```
-Open the displayed loopback Vite URL. Start with **Load demo register**. Use a separate demo database for experiments; do not point this prototype at another application's database.
+Open the displayed loopback Vite URL. Choose an empty catalog and currency, or **Load demo register**. Use a separate demo database for experiments; do not point this prototype at another application's database.
 
 ### Windows native development build
 
 See [native setup and packaging](apps/register/src-tauri/README.md). The included Register workflow tests the service and frontend, then builds an **unsigned Windows development installer**. A successful artifact build is not a real-device usability or peripheral test. iPhone/iPad packaging is not implemented in this milestone.
 
-Local data is not encrypted by this prototype. Protect the device and back up the database with the application closed; automated backup/restore UI, migrations beyond the initial schema, refunds, inventory, and printer/scale drivers remain future work. Never replace or delete a merchant's data file to resolve an error.
+Local data and exported files are not encrypted by this prototype. Protect the device and keep a separate copy of backups. Use the snapshot export instead of copying an active SQLite file. Recovery is an explicit offline operation to a new file, not an in-app overwrite. Migrations beyond the initial schema, refunds, inventory, and printer/scale drivers remain future work. Never replace or delete a merchant's data file to resolve an error.
 
 ## Milestone 1: portable pricing core
 
@@ -73,7 +85,7 @@ Callers must explicitly supply the rounding policy, overage policy, tier allowan
 
 Tolerance is currently applied **once to the total eligible weight of a pricing group**, not once per visual cart row. This is an explicit prototype policy, not a claim that LJ has chosen it as the sole future workflow. It avoids multiplying allowances by splitting lines. Separate per-portion allowances require a deliberate future design with stable portion identities.
 
-The implemented pricing schedule is a single selected tier rate, not a general promotion optimizer. It does not automatically compose bundles, stack discounts, choose the cheapest combination, or merge different price bands. Put different price bands into separate groups. When a larger tier is crossed, its configured rate is selected; merchant schedules can intentionally create price discontinuities. Setup previews/warnings belong in the future configuration UI.
+The implemented pricing schedule is a single selected tier rate, not a general promotion optimizer. It does not automatically compose bundles, stack discounts, choose the cheapest combination, or merge different price bands. Put different price bands into separate groups. When a larger tier is crossed, its configured rate is selected; merchant schedules can intentionally create price discontinuities. The configuration UI exposes these choices; test representative baskets after editing a schedule, especially near tier boundaries.
 
 ## Physical truth versus pricing
 
@@ -102,6 +114,6 @@ The intended application direction is independent Windows/tablet and Apple-devic
 
 ## GitHub handoff
 
-LJ selected the public GitHub repository `LJrobinson/GRAM-POS`. The license is still pending. This source is prepared for its initial commit. Do not overwrite the existing UnitMath, CannabisMath, or MOBY repositories. The crate sets `publish = false`; a public package release is not part of this milestone.
+LJ selected the public GitHub repository `LJrobinson/GRAM-POS`. The license is still pending. The portable core and demo register are published; new milestones are reviewed through draft pull requests. Do not overwrite the existing UnitMath, CannabisMath, or MOBY repositories. The crate sets `publish = false`; a public package release is not part of this milestone.
 
 Before publishing: choose a license and add complete notices, review the accepted commercial rules, and run the included CI on the intended platforms. See `PROVENANCE.md` for details. No license has been selected on the owner's behalf.

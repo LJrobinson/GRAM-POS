@@ -4,5 +4,5 @@
   "description": "Only the bundled main register window may call the local register service.",
   "windows": ["main"],
   "local": true,
-  "permissions": ["allow-register-command"]
+  "permissions": ["allow-register-command", "allow-save-export"]
 }

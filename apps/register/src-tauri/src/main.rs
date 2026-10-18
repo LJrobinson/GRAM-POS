@@ -3,8 +3,12 @@
 use gram_register_service::{RegisterService, ServiceError};
 use serde::Serialize;
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::{
+    io::Write,
+    sync::{Arc, Mutex},
+};
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 type SharedRegister = Arc<Mutex<RegisterService>>;
 
@@ -43,7 +47,7 @@ fn dispatch(
         .map_err(CommandError::from)
 }
 
-// This is the only application IPC entry point. It accepts service operations,
+// This is the register service IPC entry point. It accepts service operations,
 // never SQL, a filesystem path, a URL, a process command, or a shell script.
 #[tauri::command]
 async fn register_command(
@@ -56,6 +60,57 @@ async fn register_command(
     tauri::async_runtime::spawn_blocking(move || dispatch(&service, &command, payload))
         .await
         .map_err(|_| unavailable())?
+}
+
+// Only this bounded command can write an export. The webview supplies neither
+// bytes nor a path; the service generates bytes and the OS picker chooses a path.
+#[tauri::command]
+async fn save_export(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SharedRegister>,
+    kind: String,
+) -> Result<Option<String>, CommandError> {
+    let service = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let export = {
+            let service = service.lock().map_err(|_| unavailable())?;
+            match kind.as_str() {
+                "backup" => service.export_backup()?,
+                "sales" => service.export_sales()?,
+                _ => {
+                    return Err(CommandError {
+                        code: "INVALID_EXPORT".into(),
+                        message: "Choose a backup or sales export.".into(),
+                    })
+                }
+            }
+        };
+        let selected = app
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .set_file_name(&export.filename)
+            .blocking_save_file();
+        let Some(selected) = selected else {
+            return Ok(None);
+        };
+        let path = selected.into_path().map_err(|_| CommandError {
+            code: "EXPORT_PATH".into(),
+            message: "Select a local destination file.".into(),
+        })?;
+        write_new_export(&path, export.content.as_bytes())?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|_| unavailable())?
+}
+
+fn write_new_export(path: &std::path::Path, content: &[u8]) -> Result<(), CommandError> {
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)
+        .map_err(|_| CommandError {code:"EXPORT_DESTINATION".into(),message:"Choose a new filename in a writable folder. Existing files are never replaced, even if the dialog offers to overwrite.".into()})?;
+    file.write_all(content).and_then(|_| file.sync_all()).map_err(|_| CommandError {
+        code:"EXPORT_WRITE".into(), message:"The export could not be completely saved. Do not use that incomplete file; retry with a new filename.".into()
+    })
 }
 
 fn is_local_navigation(url: &tauri::Url, development: bool) -> bool {
@@ -77,6 +132,7 @@ fn is_local_navigation(url: &tauri::Url, development: bool) -> bool {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
             std::fs::create_dir_all(&directory)?;
@@ -99,7 +155,7 @@ fn main() {
                 .build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![register_command])
+        .invoke_handler(tauri::generate_handler![register_command, save_export])
         .run(tauri::generate_context!())
         .expect("GRAM POS could not start; check local data-directory access and WebView2");
 }
@@ -107,6 +163,22 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exports_never_replace_existing_files() {
+        let path = std::env::temp_dir().join(format!(
+            "gram-native-export-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        write_new_export(&path, b"original").unwrap();
+        assert!(write_new_export(&path, b"replacement").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn production_navigation_accepts_only_bundled_origins() {
@@ -153,7 +225,7 @@ mod tests {
             serde_json::from_str(include_str!("../capabilities/register.json")).unwrap();
         assert_eq!(
             capability["permissions"],
-            serde_json::json!(["allow-register-command"])
+            serde_json::json!(["allow-register-command", "allow-save-export"])
         );
         assert_eq!(capability["windows"], serde_json::json!(["main"]));
         assert_eq!(capability["local"], true);

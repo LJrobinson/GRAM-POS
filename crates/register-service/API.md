@@ -1,4 +1,4 @@
-# GRAM register service: milestone 2
+# GRAM register service: milestone 3
 
 `gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to the unchanged `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
 
@@ -40,7 +40,10 @@ Use stable, unique line IDs. Catalog SKU determines kind, declared package conte
 |---|---|---|
 | `get_state` | `{}` | `{configured, config_revision, config, catalog, draft:{lines:[]}}` |
 | `initialize_demo` | `{}` | State; fails `ALREADY_CONFIGURED` rather than overwrite settings |
-| `put_config` | `{config: Config}` | State, after complete validation and revision increment |
+| `initialize_empty` | `{currency:{code,minor_unit_exponent}}` | Empty configured State; never overwrites settings |
+| `put_config` | `{config: Config,expected_config_revision:"1"}` | State, after complete validation and revision increment; stale revision fails `STALE_CONFIG` |
+| `export_sales` | `{}` | `{filename,media_type,content}` with versioned full receipt JSON |
+| `export_backup` | `{}` | `{filename,media_type,content}` with consistent logical backup JSON |
 | `quote_cart` | `{lines: CartInputLine[]}` | `Quote` from the Rust core |
 | `save_draft` | `{lines: CartInputLine[]}` | `{saved:true}` |
 | `complete_cash_sale` | Checkout below | `Receipt` |
@@ -68,7 +71,7 @@ Drafts can contain incomplete quantity text for interrupted typing, but must hav
 
 ## Settings
 
-All choices are required. There are no implicit revenue-policy defaults. `put_config` validates the entire configuration before replacing the prior revision. Only `schema_version:1`, `demo:true`, and `tax_mode:"demo_no_tax"` are currently accepted.
+All pricing choices are required. An empty catalog is valid. Products have an `archived` boolean (absent legacy values mean false); archived products remain in configuration but return `ARCHIVED_PRODUCT` if quoted. Drafts are never silently deleted when products are archived. Duplicate SKUs and group IDs, unknown group references, malformed prices, and invalid tier schedules fail atomically. There are no implicit revenue-policy defaults. `put_config` validates the entire configuration before replacing the prior revision. The command requires the revision the editor loaded; its comparison and write share an immediate transaction. Typed `put_config_checked` provides the same guard; unguarded `put_config` is a low-level trusted Rust setup/testing API, not exposed as an unguarded IPC command. Only `schema_version:1`, `demo:true`, and `tax_mode:"demo_no_tax"` are currently accepted.
 
 ```json
 {
@@ -86,6 +89,7 @@ All choices are required. There are no implicit revenue-policy defaults. `put_co
     "tolerance_scope":"aggregate_pricing_group"
   }],
   "catalog":[{
+    "archived":false,
     "sku":"bulk-a",
     "name":"Demo Bulk A",
     "kind":"measured",
@@ -112,7 +116,7 @@ Host headers must be `127.0.0.1:<backend port>` or `localhost:<backend port>`. O
 
 ## Local storage guarantees and limits
 
-SQLite bundled with `rusqlite` provides transactional local storage with foreign keys, full synchronization, an application ID, and schema version 1. Unsupported future schemas and nonempty foreign files are rejected. Sale and receipt update/delete triggers protect immutable records through normal SQL operations; this is not tamper-resistant accounting against a user with arbitrary file access. Keep the database on a local filesystem, not a network share. This milestone does not encrypt or back up the database, handle disk replacement, or implement a migration/recovery utility.
+SQLite bundled with `rusqlite` provides transactional local storage with foreign keys, full synchronization, an application ID, and schema version 1. Unsupported future schemas and nonempty foreign files are rejected. Sale and receipt update/delete triggers protect immutable records through normal SQL operations; this is not tamper-resistant accounting against a user with arbitrary file access. Keep the database on a local filesystem, not a network share. Exports are unencrypted logical snapshots, not a synchronization protocol or tamper-resistant accounting archive. See [backup and recovery](../../docs/backup.md) for the versioned format, recovery tool, and restrictions. No migration to a future schema is implied.
 
 Tests include fresh-file explicit setup, close/reopen, replay after policy edits, conflicting replay, concurrent connections, underpayment/malformed tender no writes, stale quote rejection, injected receipt-write rollback, immutable rows, invalid settings preserving prior settings, future-schema rejection, policy/core agreement, pooled declared-vs-measured weight, and integers beyond JavaScript's safe-number range.
 
