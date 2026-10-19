@@ -12,7 +12,51 @@ Expected drawer cash is **opening float + cash sales − cash refunds + paid-ins
 
 The cash view separates every total and shows movement reasons and event details in the configured store timezone. Schema/backup v4 preserves the ledger and parked-cart recovery in one consistent snapshot; recovery still accepts v1/v2/v3 backups without rewriting historical receipts. See the [cash workflow and limits](docs/cash-sessions.md), [backup guide](docs/backup.md) and [validation status](VALIDATION.md).
 
-Desktop and phone browser scenarios are included for reviewed paid-ins, recorded paid-outs and closing/history. Current milestone-10 screenshots will be added only from verified passing real-Rust CI artifacts. The earlier screenshots below retain their original milestone labels. This prototype does not move real money or activate cash-drawer hardware.
+These unmodified desktop and phone captures come from the [passing real-Rust browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39211604267/job/117926524649) for source commit `f3a798f`. All **47 browser scenarios** passed against Rust and SQLite. Cedar Market records are synthetic training data, not customer data or real cash transfers. Browser viewport checks do not certify native WebView2 or physical cash-drawer hardware.
+
+<details>
+<summary>Review an exact paid-in before recording it</summary>
+
+The 12.50 paid-in has a required reason, session identity, explicit confirmation and a preview from $50.00 to $62.50 expected cash. Review alone does not write a movement. The phone dialog scrolls vertically; Edit and Cancel are below this captured view.
+
+![GRAM desktop paid-in review showing 12.50 dollars, reason, 62.50 expected cash and separate Confirm, Edit and Cancel controls](docs/screenshots/cash-paid-in-review-desktop.png)
+
+![GRAM phone paid-in review showing the exact amount, reason and confirmation before the permanent drawer-only record](docs/screenshots/cash-paid-in-review-phone.png)
+
+</details>
+
+<details>
+<summary>Keep paid-outs separate from sales and refunds</summary>
+
+A $10.00 paid-out reduces expected cash from $82.50 to $72.50 without changing revenue. The review states the permanent drawer-only effect and the conservative expected-cash limit.
+
+![GRAM desktop paid-out review with a 10 dollar reasoned removal and unchanged sales and revenue](docs/screenshots/cash-paid-out-review-desktop.png)
+
+![GRAM phone paid-out review with the 82.50 to 72.50 expected cash preview and explicit confirmation](docs/screenshots/cash-paid-out-review-phone.png)
+
+</details>
+
+<details>
+<summary>Reconcile every drawer component before closing</summary>
+
+The closing review shows **$50.00 opening + $25.00 sales − $5.00 refunds + $12.50 paid in − $10.00 paid out = $72.50 expected and counted**, with zero variance. Each component stays separately labeled. The phone dialog is vertically scrollable, with Cancel below this viewport.
+
+![GRAM desktop closing review separating float, sales, refunds, paid-ins and paid-outs with 72.50 expected cash and zero variance](docs/screenshots/cash-movement-closing-desktop.png)
+
+![GRAM phone closing review showing every drawer total and explicit final-count confirmation](docs/screenshots/cash-movement-closing-phone.png)
+
+</details>
+
+<details>
+<summary>Keep immutable movement history in the store timezone</summary>
+
+After closing, the drawer has no open session. Paid-in/out entries retain their own IDs, reasons, amounts and session IDs. Times explicitly use **Asia/Tokyo**, although the browser test runs in Honolulu. The phone capture shows the first movement; subsequent records remain vertically scrollable.
+
+![GRAM desktop cash history showing distinct paid-out and paid-in records with reasons and Tokyo timestamps after closing](docs/screenshots/cash-movement-history-desktop.png)
+
+![GRAM phone cash history showing immutable paid-out identity, session, reason and explicit Tokyo timezone](docs/screenshots/cash-movement-history-phone.png)
+
+</details>
 
 ## Park a cart and return to it (milestone 9)
 
