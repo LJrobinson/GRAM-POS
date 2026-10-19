@@ -1,4 +1,6 @@
 import { money, quantityLabel, ruleNames } from './format.ts';
+import { DEFAULT_STORE_SETTINGS } from './storeSettings.ts';
+import { reportDateTime } from './reports.ts';
 import type { Receipt } from './types.ts';
 
 /** Keep reprints independent of the device's locale and current time zone. */
@@ -17,10 +19,12 @@ export function receiptTimestamp(unix: string): string {
  */
 export function receiptView(receipt: Receipt) {
   const { quote } = receipt;
+  const store = receipt.config_snapshot?.store_settings ?? { ...DEFAULT_STORE_SETTINGS, display_name: 'GRAM' };
   return {
+    store,
     saleId: receipt.sale_id,
     number: receipt.receipt_number,
-    createdAt: receiptTimestamp(receipt.created_at_unix),
+    createdAt: reportDateTime(receipt.created_at_unix, store.timezone),
     revision: quote.config_revision,
     currency: quote.currency.code,
     lines: quote.lines.map(line => ({

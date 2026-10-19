@@ -54,9 +54,34 @@ pub struct BarcodeLookup {
     pub config_revision: String,
 }
 
+/// Optional branding for new receipts. Legacy snapshots remain absent on serialization.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoreSettings {
+    pub display_name: String,
+    pub receipt_header: String,
+    pub receipt_contact: String,
+    pub receipt_footer: String,
+    pub timezone: String,
+}
+
+impl Default for StoreSettings {
+    fn default() -> Self {
+        Self {
+            display_name: "GRAM POS".into(),
+            receipt_header: String::new(),
+            receipt_contact: String::new(),
+            receipt_footer: String::new(),
+            timezone: "UTC".into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_settings: Option<StoreSettings>,
     pub schema_version: u32,
     pub demo: bool,
     pub tax_mode: String,
@@ -271,11 +296,38 @@ pub struct SalesReportInput {
     pub end_date: String,
 }
 
+/// Calendar dates in the explicitly selected IANA zone. Omitted zone means UTC.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SalesReportRequest {
+    pub start_date: String,
+    pub end_date: String,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub expected_config_revision: Option<String>,
+}
+
+impl From<SalesReportInput> for SalesReportRequest {
+    fn from(input: SalesReportInput) -> Self {
+        Self {
+            start_date: input.start_date,
+            end_date: input.end_date,
+            timezone: None,
+            expected_config_revision: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SalesReport {
     pub start_date: String,
     pub end_date: String,
     pub timezone: String,
+    /// Resolved inclusive/exclusive UTC seconds, exact decimal strings.
+    pub start_at_unix: String,
+    pub end_at_unix: String,
+    pub config_revision: String,
     pub groups: Vec<SalesReportGroup>,
     pub events: Vec<SalesReportEvent>,
 }
@@ -299,6 +351,9 @@ pub enum SalesReportEventKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SalesReportEvent {
+    /// ISO 8601 local timestamp with numeric offset, including historical seconds.
+    pub created_at_local: String,
+    pub utc_offset_seconds: String,
     pub kind: SalesReportEventKind,
     /// Scoped by kind: sale ID for a sale, refund ID for a refund.
     pub event_id: String,

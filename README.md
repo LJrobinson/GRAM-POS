@@ -4,6 +4,47 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Store identity and local business days (milestone 8)
+
+Version **0.8.0** adds a revision-checked **Store settings** editor with an explicit receipt preview, Save and Cancel. Configure the store display name and optional plain-text header, contact and footer without changing currency or pricing. New receipts retain the saved identity; existing receipt bytes and legacy printing are unchanged. Training warnings cannot be removed.
+
+Reports now accept an explicit IANA timezone, defaulting to UTC for compatibility. The register offers the saved store timezone, but each report can select another zone. Rust resolves inclusive/exclusive local calendar midnights using IANA rules, including 23-hour and 25-hour daylight-saving days, and returns exact UTC boundaries. CSV exports identify the zone, bounds, revision and event offsets; stale settings prevent exporting an outdated selection. See [store settings and timezone guide](docs/store-settings.md) and [receipt/report semantics](docs/receipts-and-reports.md).
+
+These unmodified screenshots come from the [passing real-browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39194908384/job/117875732987) at commit `08bbd98`, using the actual Rust service and SQLite. They show training fixtures, not real business data, production certification or physical-device testing.
+
+<details>
+<summary>Preview store identity before saving</summary>
+
+The display name, optional plain-text receipt fields and default report timezone are reviewed before Save. The preview keeps its mandatory training warning; viewing or canceling it does not write settings.
+
+![GRAM store settings with Cedar Market identity, Los Angeles timezone and unsaved receipt preview](docs/screenshots/store-settings-preview-desktop.png)
+
+![GRAM mobile receipt identity preview with Save and Cancel and retained training notice](docs/screenshots/store-settings-preview-phone.png)
+
+</details>
+
+<details>
+<summary>Reprint the identity saved with the original sale</summary>
+
+The original Cedar Market receipt still shows its saved header, contact, footer and Los Angeles offset after current settings were changed to another name and timezone. The browser test also refunds the sale and verifies that its original printable markup remains identical.
+
+![GRAM original Cedar Market receipt showing two training totes totaling 8.50 dollars and saved GMT-07 offset](docs/screenshots/store-branded-receipt-desktop.png)
+
+![GRAM mobile original branded receipt with wrapped text and unchanged totals](docs/screenshots/store-branded-receipt-phone.png)
+
+</details>
+
+<details>
+<summary>Report local business days with resolved UTC boundaries</summary>
+
+The report identifies `America/Los_Angeles`, inclusive/exclusive local dates, resolved UTC bounds and per-event offsets. The deliberately enormous totals exercise exact-integer arithmetic across the shared training fixtures; they are not real revenue. The phone capture shows the timezone/date controls; summary and activity remain below the fold by vertical scrolling.
+
+![GRAM Los Angeles sales report with resolved UTC bounds, separate refunds and exact large training totals](docs/screenshots/store-timezone-report-desktop.png)
+
+![GRAM mobile local-timezone reporting controls and date boundary explanation](docs/screenshots/store-timezone-report-phone.png)
+
+</details>
+
 ## Bulk catalog CSV (milestone 7)
 
 Version 0.7.0 adds local, versioned catalog CSV export/templates and a read-only import preview before explicit atomic Apply. SKU is the stable upsert identity; missing products are never deleted. Errors identify rows, duplicate active/archived barcodes, missing price groups, and invalid exact amounts. Revision checks prevent overwriting newer edits. Spreadsheet-safe `text:` encoding is reversible, including leading-zero barcodes and legitimate apostrophes. See the [operator guide and complete CSV format](docs/catalog-csv.md).

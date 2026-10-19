@@ -10,7 +10,9 @@ import './receipt.css';
 export function SavedReceipt({ receipt }: { receipt: Receipt }) {
   const view = receiptView(receipt);
   return <div className="receipt-paper" id="print-receipt" data-sale-id={view.saleId}>
-    <div className="receipt-brand">GRAM<span>DEMO / TRAINING RECEIPT</span></div>
+    <div className="receipt-brand">{view.store.display_name}<span>DEMO / TRAINING RECEIPT</span></div>
+    {view.store.receipt_header && <p className="receipt-custom">{view.store.receipt_header}</p>}
+    {view.store.receipt_contact && <p className="receipt-custom">{view.store.receipt_contact}</p>}
     <div className="receipt-meta"><strong>{view.number}</strong><span>{view.createdAt}</span></div>
     <div className="saved-badge"><Icon name="check" size={14}/>Saved locally · cash · {view.currency}</div>
     <p className="receipt-snapshot-note">Original saved sale · not a tax receipt</p>
@@ -29,6 +31,7 @@ export function SavedReceipt({ receipt }: { receipt: Receipt }) {
       <div className="change-row"><span>Change due</span><strong>{view.change}</strong></div>
     </div>
     <p className="receipt-reference">Sale: {view.saleId}<br/>Saved pricing revision: {view.revision}</p>
+    {view.store.receipt_footer && <p className="receipt-custom">{view.store.receipt_footer}</p>}
     <p className="receipt-fine">Training only. Tax is not configured.<br/>Not a tax or compliance receipt.<br/>Later refunds are separate records; this original sale does not change.</p>
   </div>;
 }

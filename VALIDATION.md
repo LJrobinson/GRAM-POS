@@ -188,3 +188,41 @@ At head `946979bfe204339ef6d4234920a5917aee702708`, both the PR and push browser
 The four unmodified CSV screenshots were visually inspected: desktop valid preview shows the create/update summary and saved/imported product details; desktop invalid preview shows exact row/line price and duplicate-barcode errors with disabled Apply; phone captures show wrapped review/errors without horizontal page overflow. Screenshots are viewport captures, so lower details and actions can require vertical scrolling. Large price and formula-shaped text fixtures are intentional exact-arithmetic/injection tests, not real transactions.
 
 The narrow CI change `-- --show-output` on native tests makes the Windows reparse-point test's privilege-skip message observable in the final-head logs. It does not elevate permissions or claim a physical file-picker test. At preparation of this evidence update, both original-head Windows packaging jobs remained running. The final evidence/workflow commit must receive its own complete CI run before any all-green or installer claim.
+
+## Milestone 8 local validation (0.8.0)
+
+Baseline: merged main `5fd88ae5253000aa939aedb13d33b7fb5fc98ef7`. All 108 tracked local Git blob hashes matched the complete recursive remote tree before edits; no preexisting differences were overwritten.
+
+Passed locally with Rust stable 1.99.1:
+
+- Workspace `cargo fmt --all -- --check`.
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`.
+- `cargo test --workspace --all-targets --all-features --locked`: **132 tests**, including six store-settings and six timezone integration tests.
+- Workspace documentation tests and the pricing demo example.
+- `npm run typecheck`, `npm test`: **69 frontend tests**, and `npm run build`.
+- `npm run test:e2e -- --list`: **21 scenarios discovered**, including five new actual-service settings/timezone scenarios. Discovery is not browser execution.
+- Native rustfmt check and complete `cargo metadata --manifest-path apps/register/src-tauri/Cargo.toml --locked --offline --format-version 1`.
+
+Backend coverage includes genuine pre-change config/receipt/backup fixtures with byte-preserving legacy roundtrips; independent-connection stale settings rejection; unchanged currency/catalog/pricing/draft/drawer; checkout quote invalidation; invalid controls/zone/backup rejection; new branding retained through later edits, restart, refund and backup export/restore. Report coverage includes UTC compatibility, Los Angeles 23/25-hour DST days, inclusive/exclusive exact instants, refunds on their own local event date, per-event offsets, Monrovia's historical second-precision offset, leap/month and pre-epoch date bounds, invalid zones and ambiguous/nonexistent/skipped midnight rejection, exact totals and stale/empty CSV metadata.
+
+Frontend coverage includes legacy GRAM/UTC formatting, saved receipt branding/timezone independent of current settings, repeated DST-hour offsets, unsupported browser-zone fallback, signed historical UTC boundary rendering, revision/zone matching and stale-request guards. New browser scenarios exercise read-only preview/cancel, explicit save, immutable branded/legacy receipts and refund printout, stale save, DST/report metadata, unknown zones, delayed report response invalidation, export-time setting changes, and confirmed/cancelled legacy settings reload. They attach actual desktop/phone settings, receipt and report captures when executed by CI.
+
+An independent read-only review found two UI edge cases before freeze: confirmed reload on unchanged legacy settings did not reset the unsaved editor, and negative UTC report boundaries were rejected by the display formatter. Both were fixed with explicit editor reset and a signed boundary formatter; unit/browser regression coverage was added, and review confirmed no remaining blockers. Full applicable local checks were rerun after fixes.
+
+Not run locally: actual Chromium browser execution/screenshots, full Tauri host compilation/tests, Windows packaging, core Rust 1.70 and WebAssembly target checks. Only stable 1.99.1 and the host target are installed here; browser sockets and native GTK/WebKit are known unavailable. No denied installation/escalation was repeated. Existing CI must validate the exact published commit on real browser/Windows, minimum Rust and WebAssembly. The new native export timezone/stale-revision test is included for Windows CI, not claimed as locally executed. New README screenshot evidence remains pending that run; no fabricated image is supplied.
+
+The portable core remains unchanged and dependency-free. New timezone dependencies are confined to the register service; workspace lock stays format 3 for Rust 1.70 compatibility, and both workspace/native dependency locks are updated. No broader filesystem permissions, live payments, taxes, inventory or sync were added.
+
+### Milestone 8 first CI correction
+
+At head `9d2a303953e8de6c3f60098088e206d3a5824ebb`, all ten core PR/push jobs (including Rust 1.70 and wasm), both frontend jobs and both Ubuntu services passed. Both Windows service jobs exposed a checkout-only difference in the golden backup fixture: Git converted its LF bytes to CRLF before the byte-preservation assertion. The assertion was retained, and `.gitattributes` now disables text conversion for the three exact-byte compatibility fixtures. This does not change backup serialization or relax receipt immutability. Browser/native jobs were skipped by that dependency failure, not executed successfully. The corrected head requires its own full CI.
+
+### Milestone 8 verified real-browser evidence
+
+At head `08bbd98f4d362e6432044617f8f4eeb5808d9ca4`, both Windows service jobs passed after the fixture-checkout correction, and both real-browser jobs passed. The six new original PNGs come from PR run [39194908384](https://github.com/LJrobinson/GRAM-POS/actions/runs/39194908384), browser job [117875732987](https://github.com/LJrobinson/GRAM-POS/actions/runs/39194908384/job/117875732987), artifact `12161750878` (`gram-pos-register-browser-review`). Original ZIP SHA256 was verified as `a104a8dcd0f0e414b8dcb8029c5cbc511dd4924641a9dc447d8f69de1470ad2a`.
+
+All six images were visually inspected before copying unmodified to `docs/screenshots`: desktop settings capture includes actual editable fields, explicit actions and preview; phone focuses on wrapped identity preview and retained warnings. Both branded receipt captures display Cedar Market, saved contact/footer, explicit Los Angeles GMT-07 label and exact $8.50 sale/$1.50 change after current branding was changed. Desktop reporting shows zone, local dates, resolved UTC bounds, separate refund total and exact large-number fixture totals; phone shows date/zone controls without horizontal overflow, with totals below the fold. Large values are deliberate shared regression fixtures, not business revenue.
+
+The same run's original `receipt-print.pdf` was rendered and visually inspected: one page, legacy GRAM/UTC identity, selected sale only, correct lines/totals and training notice. It is not a branded-receipt PDF or a physical-printer/native-dialog test; no such verification is claimed. The existing milestone-5 PDF remains separately labeled in the README rather than being silently replaced.
+
+At preparation of this evidence commit, Windows packaging was still running on the source head. The final evidence/docs head must receive its own complete PR/push checks and generated installer artifacts before an all-green or ready-to-merge claim.

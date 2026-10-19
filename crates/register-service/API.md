@@ -1,4 +1,4 @@
-# GRAM register service: milestone 7
+# GRAM register service: milestone 8
 
 `gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
 
@@ -42,6 +42,7 @@ Use stable, unique line IDs. Catalog SKU determines kind, declared package conte
 | `initialize_demo` | `{}` | State; fails `ALREADY_CONFIGURED` rather than overwrite settings |
 | `initialize_empty` | `{currency:{code,minor_unit_exponent}}` | Empty configured State; never overwrites settings |
 | `put_config` | `{config: Config,expected_config_revision:"1"}` | State, after complete validation and revision increment; stale revision fails `STALE_CONFIG` |
+| `put_store_settings` | `{store_settings:{display_name,receipt_header,receipt_contact,receipt_footer,timezone},expected_config_revision:"1"}` | State after atomic settings-only update; stale revision fails `STALE_CONFIG` |
 | `export_sales` | `{}` | `{filename,media_type,content}` with versioned full receipt JSON |
 | `export_backup` | `{}` | `{filename,media_type,content}` with consistent logical backup JSON |
 | `export_catalog_csv` | `{}` | Saved catalog as reversible spreadsheet-safe `ExportFile` |
@@ -161,17 +162,22 @@ See [cash-session workflow](../../docs/cash-sessions.md) for operator and retry 
 
 New frontend cash-sale/refund requests bind `expected_session_id` and `expected_currency`; opening requests bind `expected_currency`. The optional JSON fields preserve deserialization and exact replay of old checkout requests, not a recommendation to omit guards in new clients. An uncompleted legacy pending checkout requires renewed review; completed legacy keys can still retrieve the original receipt.
 
-## Read-only sales reports and CSV (v0.5)
+## Read-only sales reports and CSV (v0.8)
 
-- `sales_report {start_date, end_date}` returns a `SalesReport` below.
-- `export_sales_report_csv {start_date, end_date}` returns `{filename,media_type,content}` with a server-generated `gram-pos-sales-report.csv` filename and `text/csv;charset=utf-8` media type. Native file saving uses the fixed export kind `sales_report_csv`; clients cannot supply CSV bytes, a filename, or a filesystem path through this report command.
-- Both commands accept only two strings, strict Gregorian `YYYY-MM-DD` dates in years `0001`–`9999`. The start midnight is **inclusive** and the end midnight is **exclusive**, always in **UTC**, not the device's local timezone. To report February 29, 2024, use `{"start_date":"2024-02-29","end_date":"2024-03-01"}`. Impossible dates, invalid leap days, timestamps, equal/reversed dates, unknown fields and alternative timezone inputs fail with `INVALID_INPUT`.
+- `sales_report {start_date, end_date, timezone?, expected_config_revision?}` returns a `SalesReport` below.
+- `export_sales_report_csv {start_date, end_date, timezone?, expected_config_revision?}` returns `{filename,media_type,content}` with a server-generated `gram-pos-sales-report.csv` filename and `text/csv;charset=utf-8` media type. Native file saving uses the fixed export kind `sales_report_csv`; clients cannot supply CSV bytes, a filename, or a filesystem path through this report command.
+- Dates are strict Gregorian `YYYY-MM-DD`, years `0001`–`9999`. Start local midnight is inclusive and end local midnight exclusive. Optional `timezone` is an exact supported IANA name; absent/null remains UTC regardless of saved store settings. The UI explicitly supplies its selected zone. Invalid zones/dates or ambiguous/nonexistent local midnights return `INVALID_INPUT`. No fixed-offset shortcut or skipped-day substitution occurs.
+- `expected_config_revision`, when supplied, must match the revision read in the same validated ledger snapshot or returns `STALE_CONFIG`. Response `start_at_unix` and `end_at_unix` are signed UTC-second strings, `timezone` identifies the resolved zone, and `config_revision` identifies that snapshot. Event `created_at_local` contains an ISO8601 local timestamp and exact numeric offset; `utc_offset_seconds` preserves historical second-level offsets. Original `created_at_unix` is unchanged.
+- Typed Rust `SalesReportInput`, `sales_report` and `export_sales_report_csv` remain date-only UTC entry points. New `SalesReportRequest`, `sales_report_with_timezone` and `export_sales_report_csv_with_timezone` expose the additive options.
 
 ```json
 {
   "start_date": "2024-02-29",
   "end_date": "2024-03-01",
   "timezone": "UTC",
+  "start_at_unix": "1709164800",
+  "end_at_unix": "1709251200",
+  "config_revision": "1",
   "groups": [{
     "currency": {"code":"USD", "minor_unit_exponent":2},
     "gross_sales_minor": "7000",
@@ -185,6 +191,8 @@ New frontend cash-sale/refund requests bind `expected_session_id` and `expected_
     "event_id": "1",
     "sale_id": "1",
     "created_at_unix": "1709164800",
+    "created_at_local": "2024-02-29T00:00:00+00:00",
+    "utc_offset_seconds": "0",
     "currency": {"code":"USD", "minor_unit_exponent":2},
     "total_minor": "3500",
     "session_id": "2",
@@ -197,7 +205,7 @@ The example event is illustrative; a full report includes every event contributi
 
 Reports use one consistent, validated saved-ledger snapshot. A sale is selected by its saved sale time; a refund is independently selected by its own saved refund time, even when its original sale falls outside the date range. Legacy sales are included once without inventing sessions. Changed or archived catalog items do not reprice original events. Each currency **and minor-unit precision** is a separate group: there is no mixed-currency grand total or conversion. Opening float, cash counts, cash-session totals, tender and change are never revenue. An empty result has `groups:[]` and `events:[]`, including an unconfigured register. A malformed/incomplete ledger fails closed rather than silently omitting history.
 
-CSV is UTF-8, with one rectangular 18-column schema: `record_type,start_date,end_date,timezone,currency_code,minor_unit_exponent,gross_sales_minor,refunds_minor,net_sales_minor,sale_count,refund_count,event_kind,event_id,sale_id,created_at_unix,total_minor,session_id,reason`. `summary` rows hold each currency/precision aggregate; `event` rows hold the matching immutable sale/refund details. Columns not applicable to a row are empty. Do not add summary rows and event rows together. An empty report produces only the header. All cells are RFC 4180 quoted, embedded quotes are doubled, and records end with CRLF. Unicode is preserved. Spreadsheet formula-leading refund text (`=`, `+`, `-`, `@`, including after whitespace) and leading tab/newline controls are prefixed with an apostrophe. Numeric cells contain only validated exact decimal representations, never formula expressions.
+CSV is UTF-8, with one rectangular 23-column schema: `record_type,start_date,end_date,timezone,start_at_unix,end_at_unix,config_revision,created_at_local,utc_offset_seconds,currency_code,minor_unit_exponent,gross_sales_minor,refunds_minor,net_sales_minor,sale_count,refund_count,event_kind,event_id,sale_id,created_at_unix,total_minor,session_id,reason`. `summary` rows hold each currency/precision aggregate; `event` rows hold the matching immutable sale/refund details. Columns not applicable to a row are empty. Do not add summary rows and event rows together. An empty explicit-timezone/revision report produces a `metadata` row carrying date/zone/bounds/revision only; old date-only empty requests still produce only the header. All cells are RFC 4180 quoted, embedded quotes are doubled, and records end with CRLF. Unicode is preserved. Spreadsheet formula-leading refund text (`=`, `+`, `-`, `@`, including after whitespace) and leading tab/newline controls are prefixed with an apostrophe. Numeric cells contain only validated exact decimal representations, never formula expressions.
 
 CSV preserves the full integer digits, but spreadsheet auto-detection can round long numbers. Import money, count, ID and Unix-time columns as **text** when exact large values must be preserved. JSON reports retain these values as strings. Reporting/exporting does not change the draft, catalog, receipt snapshots, idempotency keys, drawer state or versioned backup/recovery format. CSV is a report, not a recoverable backup.
 
@@ -227,3 +235,10 @@ Valid rows include `{row,line,sku,action,before,after}` where `action` is `creat
 After an uncertain transport outcome, fetch `get_state`, preview the same CSV again, review, then explicitly apply if still needed. Do not blindly retry. Stable required SKUs ensure a committed create becomes unchanged/update in the next preview; the old revision cannot duplicate it. This is not checkout's idempotency-key contract and does not add an operation journal. Another process may change configuration after commit and before the returned State read; State is authoritative latest saved data, not proof of a transaction-specific snapshot.
 
 The native `select_catalog_csv` picker has no caller path parameter and returns `{filename,content}` or null; selecting a file is not an import. Native `save_export` gains fixed kinds `catalog_csv` and `catalog_template`; it still generates all bytes in the service and never overwrites an existing file. The development JSON transport is capped at 8 MiB to allow escaped CSV payloads; the service enforces the independent 1 MiB CSV bound. No production network service, shell execution, filesystem grant or automatic import is added.
+
+
+## Store identity (v0.8)
+
+`Config.store_settings` is optional and absent legacy values are omitted when serialized, never filled into an old receipt. When present all five fields are required strings: `display_name` (nonblank, maximum 120 Unicode scalar values), `receipt_header` (500), `receipt_contact` (240), `receipt_footer` (500), and `timezone` (supported exact IANA name). Empty optional text is allowed. Controls, U+2028/U+2029, bidi overrides U+202A–U+202E and isolates U+2066–U+2069 are rejected. Text is single-line and rendered escaped. Mandatory demo/training warnings are not fields.
+
+`put_store_settings` requires an existing register and exact revision, acquires an immediate transaction, modifies only settings on the current configuration and increments revision. It preserves currency, groups, catalog, draft and drawer state. Generic `put_config` and backup recovery apply the same settings validation. A settings write makes existing quotes stale. New receipts snapshot explicitly saved settings; earlier snapshots and embedded backup receipt strings are never rewritten. SQLite/config/backup schema versions remain unchanged. For defaults, preview/cancel, uncertain-response recovery, printing and timezone edge rules see [operator guide](../../docs/store-settings.md).

@@ -68,3 +68,5 @@
      72mm content + 4mm margins fits 80mm thermal stock or ordinary pages. */
   @page { size: auto; margin: 4mm; }
 }
+
+.receipt-brand, .receipt-custom { overflow-wrap: anywhere; }

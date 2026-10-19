@@ -572,6 +572,11 @@ impl RegisterService {
     pub(super) fn report_records(&self) -> Result<super::report::ReportRecords, ServiceError> {
         let backup = self.logical_backup()?;
         Ok(super::report::ReportRecords {
+            config_revision: backup
+                .settings
+                .as_ref()
+                .map(|s| s.revision.clone())
+                .unwrap_or_else(|| "0".into()),
             receipts: backup
                 .sales
                 .iter()

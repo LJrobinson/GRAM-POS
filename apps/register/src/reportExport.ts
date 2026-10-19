@@ -5,7 +5,8 @@ import type { SalesReportRange } from './reports';
 type ExportFile = { filename: string; media_type: string; content: string };
 
 /** Only a fixed server-generated report kind and validated range cross native IPC. */
-export async function exportSalesReport(range: SalesReportRange): Promise<string> {
+export async function exportSalesReport(range: SalesReportRange, isCurrent: () => boolean = () => true): Promise<string> {
+  if (!isCurrent()) return 'Export cancelled because the selection changed.';
   if ('__TAURI_INTERNALS__' in window) {
     try {
       const path = await invoke<string | null>('save_export', { kind: 'sales_report_csv', range });
@@ -16,6 +17,7 @@ export async function exportSalesReport(range: SalesReportRange): Promise<string
     }
   }
   const file = await command<ExportFile>('export_sales_report_csv', range);
+  if (!isCurrent()) return 'Export cancelled because the selection changed.';
   const url = URL.createObjectURL(new Blob([file.content], { type: file.media_type }));
   try {
     const anchor = document.createElement('a');
