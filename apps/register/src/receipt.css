@@ -1,0 +1,70 @@
+/* The on-screen preview and paper output share the same saved-receipt DOM. */
+.receipt-paper .receipt-meta { flex-wrap: wrap; gap: 6px 14px; }
+.receipt-paper .receipt-lines > div > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.receipt-paper .receipt-lines > div > strong { flex: 0 1 auto; min-width: 0; max-width: 50%; overflow-wrap: anywhere; text-align: right; }
+.receipt-paper .receipt-totals > div > :last-child { min-width: 0; max-width: 65%; overflow-wrap: anywhere; text-align: right; }
+.receipt-paper .receipt-group, .receipt-reference { overflow-wrap: anywhere; }
+.receipt-snapshot-note { margin: 12px 0 0; text-align: center; font-size: 9px; line-height: 1.6; }
+.receipt-reference { margin-top: 18px; font-size: 8px; line-height: 1.7; }
+.receipt-print-help { margin-top: 14px; color: #687660; font-size: 10px; line-height: 1.7; }
+.refund-status > strong { display: block; margin: 18px 0 8px; font-size: 11px; line-height: 1.6; }
+.refund-status p { overflow-wrap: anywhere; }
+
+@media print {
+  /* Remove layout, not merely visibility, so hidden screens cannot create
+     blank pages. With no selected receipt, the application prints no content. */
+  body > :not(#root),
+  #root > :not(.app-shell),
+  #root > .app-shell > :not(.receipt-modal-backdrop),
+  .receipt-modal-backdrop > .modal > :not(#print-receipt) {
+    display: none !important;
+  }
+
+  html, body, #root, #root > .app-shell,
+  .receipt-modal-backdrop, .receipt-modal-backdrop > .modal {
+    position: static !important;
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: white !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    transform: none !important;
+  }
+
+  #print-receipt {
+    position: static;
+    display: block;
+    width: 72mm;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    font-size: 10pt;
+  }
+  #print-receipt, #print-receipt * { color: #000 !important; background: #fff !important; }
+  #print-receipt .receipt-brand { font-size: 22pt; }
+  #print-receipt .receipt-brand > span { font-size: 8pt; letter-spacing: .6pt; font-weight: 600; }
+  #print-receipt .receipt-meta, #print-receipt .saved-badge,
+  #print-receipt .receipt-snapshot-note, #print-receipt .receipt-group { font-size: 9pt; }
+  #print-receipt .receipt-lines > div, #print-receipt .receipt-totals { font-size: 10pt; }
+  #print-receipt .receipt-lines small, #print-receipt .receipt-reference,
+  #print-receipt .receipt-fine { font-size: 8pt; }
+  #print-receipt .receipt-lines > div, #print-receipt .receipt-group,
+  #print-receipt .receipt-totals, #print-receipt .receipt-fine,
+  #print-receipt .receipt-reference { break-inside: avoid; page-break-inside: avoid; }
+  #print-receipt .receipt-total, #print-receipt .receipt-total strong { font-size: 16pt; }
+  #print-receipt .receipt-fine { margin-top: 18px; }
+  /* Keep paper selection in the OS dialog. "80mm auto" is invalid CSS;
+     72mm content + 4mm margins fits 80mm thermal stock or ordinary pages. */
+  @page { size: auto; margin: 4mm; }
+}

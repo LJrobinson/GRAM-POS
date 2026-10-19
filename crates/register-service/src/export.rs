@@ -567,6 +567,26 @@ impl RegisterService {
         tx.commit()?;
         Ok(backup)
     }
+    // Reports share export/recovery validation and one consistent read snapshot,
+    // but consume only event records, never drawer aggregates or live catalog prices.
+    pub(super) fn report_records(&self) -> Result<super::report::ReportRecords, ServiceError> {
+        let backup = self.logical_backup()?;
+        Ok(super::report::ReportRecords {
+            receipts: backup
+                .sales
+                .iter()
+                .map(|row| decode_stored(&row.receipt_json))
+                .collect::<Result<_, _>>()?,
+            refunds: backup
+                .refunds
+                .as_ref()
+                .ok_or_else(corrupt)?
+                .iter()
+                .map(|row| decode_stored(&row.receipt_json))
+                .collect::<Result<_, _>>()?,
+            sale_sessions: backup.sale_sessions.ok_or_else(corrupt)?,
+        })
+    }
     pub fn export_backup(&self) -> Result<ExportFile, ServiceError> {
         make_export("gram-pos-backup.json", &self.logical_backup()?)
     }

@@ -205,3 +205,14 @@ or external publication is part of these acceptance results.
 - Request replay returns the original result after later configuration/session changes; changed payload reuse fails.
 - Schema-1 receipts/requests remain byte-preserved legacy records. Portable v1 backups still restore, while v2 includes ledger and relationships.
 - No claim of live payment processing, inventory, production tax/fiscal compliance, or physical cash verification is made.
+
+
+## Milestone 5: saved receipts and event-date reports
+
+- The receipt view takes only the immutable stored receipt for product names, physical/declared quantities, pricing-group details, currency and money. Current refund status is separate screen-only context.
+- Printing is explicit, target-checked, read-only and limited by CSS to the selected saved receipt. Cancel/return from the print dialog is not treated as proof of printing and has no ledger side effect.
+- A validated consistent ledger snapshot drives strict Gregorian UTC date reports: start midnight included, end midnight excluded. Sales and refunds use their own event timestamps, including refunds outside the original sale range.
+- Exact summary groups use `(currency code, minor-unit exponent)`; gross sales, refunds and possibly negative net remain distinct. Legacy sales count once. Session float, cash received/change and closing balances never become sales revenue.
+- Server-generated CSV uses fixed columns and filename, RFC-style quoting and CRLF rows, Unicode preservation, spreadsheet formula-prefix defense for refund reasons, and exact integer minor-unit text. Empty results produce the header only.
+- The report/CSV additions do not migrate schema, mutate receipts, change idempotency, or alter the existing backup/recovery format. Reports are not recovery files.
+- Rust report tests cover UTC boundaries and leap dates, refund-only periods, currency/precision groups, legacy/archive handling, totals beyond u64, malformed input, immutable recovery replay, corrupted records and CSV escaping/injection. Frontend/browser coverage and execution status are recorded in VALIDATION.md.

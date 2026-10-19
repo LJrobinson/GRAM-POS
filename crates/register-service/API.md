@@ -147,3 +147,43 @@ Session currency and minor-unit precision are frozen at opening. Configuration c
 See [cash-session workflow](../../docs/cash-sessions.md) for operator and retry guidance.
 
 New frontend cash-sale/refund requests bind `expected_session_id` and `expected_currency`; opening requests bind `expected_currency`. The optional JSON fields preserve deserialization and exact replay of old checkout requests, not a recommendation to omit guards in new clients. An uncompleted legacy pending checkout requires renewed review; completed legacy keys can still retrieve the original receipt.
+
+## Read-only sales reports and CSV (v0.5)
+
+- `sales_report {start_date, end_date}` returns a `SalesReport` below.
+- `export_sales_report_csv {start_date, end_date}` returns `{filename,media_type,content}` with a server-generated `gram-pos-sales-report.csv` filename and `text/csv;charset=utf-8` media type. Native file saving uses the fixed export kind `sales_report_csv`; clients cannot supply CSV bytes, a filename, or a filesystem path through this report command.
+- Both commands accept only two strings, strict Gregorian `YYYY-MM-DD` dates in years `0001`–`9999`. The start midnight is **inclusive** and the end midnight is **exclusive**, always in **UTC**, not the device's local timezone. To report February 29, 2024, use `{"start_date":"2024-02-29","end_date":"2024-03-01"}`. Impossible dates, invalid leap days, timestamps, equal/reversed dates, unknown fields and alternative timezone inputs fail with `INVALID_INPUT`.
+
+```json
+{
+  "start_date": "2024-02-29",
+  "end_date": "2024-03-01",
+  "timezone": "UTC",
+  "groups": [{
+    "currency": {"code":"USD", "minor_unit_exponent":2},
+    "gross_sales_minor": "7000",
+    "refunds_minor": "3500",
+    "net_sales_minor": "3500",
+    "sale_count": "2",
+    "refund_count": "1"
+  }],
+  "events": [{
+    "kind": "refund",
+    "event_id": "1",
+    "sale_id": "1",
+    "created_at_unix": "1709164800",
+    "currency": {"code":"USD", "minor_unit_exponent":2},
+    "total_minor": "3500",
+    "session_id": "2",
+    "reason": "Returned next day"
+  }]
+}
+```
+
+The example event is illustrative; a full report includes every event contributing to its groups. Groups are sorted by currency code and precision. Events are sorted by numeric Unix time, then sale before refund for equal times, then numeric event ID. `event_id` is scoped by `kind`: sale ID for a sale, refund ID for a refund. `reason` is null for sales; `session_id` is null for legacy sales. IDs, timestamps, amounts and both counts are exact decimal strings. A refund event's `total_minor` is its nonnegative saved payout. Group net is gross sales minus refunds and may be negative in a refund-only period.
+
+Reports use one consistent, validated saved-ledger snapshot. A sale is selected by its saved sale time; a refund is independently selected by its own saved refund time, even when its original sale falls outside the date range. Legacy sales are included once without inventing sessions. Changed or archived catalog items do not reprice original events. Each currency **and minor-unit precision** is a separate group: there is no mixed-currency grand total or conversion. Opening float, cash counts, cash-session totals, tender and change are never revenue. An empty result has `groups:[]` and `events:[]`, including an unconfigured register. A malformed/incomplete ledger fails closed rather than silently omitting history.
+
+CSV is UTF-8, with one rectangular 18-column schema: `record_type,start_date,end_date,timezone,currency_code,minor_unit_exponent,gross_sales_minor,refunds_minor,net_sales_minor,sale_count,refund_count,event_kind,event_id,sale_id,created_at_unix,total_minor,session_id,reason`. `summary` rows hold each currency/precision aggregate; `event` rows hold the matching immutable sale/refund details. Columns not applicable to a row are empty. Do not add summary rows and event rows together. An empty report produces only the header. All cells are RFC 4180 quoted, embedded quotes are doubled, and records end with CRLF. Unicode is preserved. Spreadsheet formula-leading refund text (`=`, `+`, `-`, `@`, including after whitespace) and leading tab/newline controls are prefixed with an apostrophe. Numeric cells contain only validated exact decimal representations, never formula expressions.
+
+CSV preserves the full integer digits, but spreadsheet auto-detection can round long numbers. Import money, count, ID and Unix-time columns as **text** when exact large values must be preserved. JSON reports retain these values as strings. Reporting/exporting does not change the draft, catalog, receipt snapshots, idempotency keys, drawer state or versioned backup/recovery format. CSV is a report, not a recoverable backup.

@@ -1,3 +1,36 @@
+# Milestone 5 validation
+
+Implemented from merged main `82d3e2ae773a591d4c253764be81215f5687d9df` on 2026-10-18. All 68 tracked local blobs were verified byte-for-byte against that Git tree before editing; no divergent user files were overwritten. App version is 0.5.0. The SQLite schema and backup/recovery formats are unchanged.
+
+## Executed locally
+
+- Rust stable 1.99.1 `cargo test --workspace --all-targets --all-features --locked`: 96 tests passed (43 core + 53 service).
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo test --workspace --doc --locked`: passed, no documentation test cases.
+- `cargo run --example pricing_demo --locked`: passed.
+- Native host formatting and locked no-dependency metadata: passed.
+- Frontend `npm run typecheck`: passed.
+- Frontend `npm test`: 41 tests passed (including 10 receipt and 10 report tests).
+- Frontend `npm run build`: passed for app version 0.5.0.
+- `npx playwright test --list`: all 5 browser scenarios discovered; discovery is not runtime execution.
+
+New backend coverage checks strict Gregorian/UTC dates and start-inclusive/end-exclusive boundaries, refunds dated outside the original-sale range, currency-plus-precision separation, negative net, exact totals beyond u64, legacy sales exactly once, renamed/archived catalog history, unchanged backup/replay, corrupt-ledger rejection, Unicode/quote/newline CSV escaping, formula-prefix defense and header-only empty exports. Independent read-only code review found no backend semantic blockers.
+
+## Runtime evidence boundary
+
+No milestone-5 browser runtime, screenshots, native Windows runtime or physical printing pass is claimed locally. Browser socket execution and native GTK/GObject dependencies remain unavailable in this environment; no repeat escalation was attempted. CI runs the real Rust/browser scenarios and Windows native checks/unsigned packaging. The new browser scenario verifies immutable receipt contents after catalog changes, explicit print-call cancellation without ledger mutation, print-only CSS/DOM and Chromium PDF output, report totals/date filtering/CSV content, and desktop/mobile screenshots. Test discovery or successful packaging is not physical printer, native save-dialog, production-payment/tax/compliance, or security certification.
+
+## Verified milestone-5 browser CI
+
+At commit `5309fc2c6695999115c5a9b5e348b1a51205f0e9`, [Register browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39177654986/job/117823723881) passed all five scenarios. Original PNGs and the print PDF were downloaded from artifact `12154867772`, matched to that exact head, and visually inspected. No generated mockup, cropping or pixel editing was substituted. The single-page PDF text and rendered pixels contain only original receipt `DEMO-00000002`, the exact $45.75 total, $50.00 tender, $4.25 change and original quantities; navigation, other receipts and current refund metadata are excluded. The separate large-amount print capture retains every digit with wrapping and no overflow.
+
+The report capture shows $178.00 gross sales, $170.75 refunds and $7.25 net; downloaded CSV was parsed and agrees exactly, with an apostrophe-neutralized formula-leading Unicode refund reason. Mobile reports use an intentionally horizontally scrolling activity table while the page and totals fit the viewport. README now includes unmodified report/receipt captures and the actual sample print PDF; older register/catalog/cash-session captures remain labeled milestone 4.
+
+At this head, Rust core CI passed Linux/macOS/Windows, Rust 1.70 and Wasm checks. Register frontend and service checks passed on Linux and Windows. Native Windows checking/unsigned packaging was still running when this screenshot update was prepared; the final PR-head workflow and artifact must be checked separately. Browser PDF generation does not prove native OS-dialog or physical-printer operation. Current behavior/limits are documented in [receipts and reports](docs/receipts-and-reports.md).
+
+---
+
 # Milestone 4 validation
 
 Implemented from main `ed648bed085606483d528381b22093b619442dcd` on 2026-10-18. Every tracked local source/artifact was verified against the published Git tree before editing; no divergent files were overwritten.

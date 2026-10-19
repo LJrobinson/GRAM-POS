@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use gram_register_service::{RegisterService, ServiceError};
+use gram_register_service::{RegisterService, SalesReportInput, ServiceError};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -69,26 +69,29 @@ async fn save_export(
     app: tauri::AppHandle,
     state: tauri::State<'_, SharedRegister>,
     kind: String,
+    range: Option<SalesReportInput>,
 ) -> Result<Option<String>, CommandError> {
     let service = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
         let export = {
             let service = service.lock().map_err(|_| unavailable())?;
-            match kind.as_str() {
-                "backup" => service.export_backup()?,
-                "sales" => service.export_sales()?,
-                _ => {
-                    return Err(CommandError {
-                        code: "INVALID_EXPORT".into(),
-                        message: "Choose a backup or sales export.".into(),
-                    })
-                }
-            }
+            generate_export(&service, &kind, range)?
         };
         let selected = app
             .dialog()
             .file()
-            .add_filter("JSON", &["json"])
+            .add_filter(
+                if kind == "sales_report_csv" {
+                    "CSV"
+                } else {
+                    "JSON"
+                },
+                if kind == "sales_report_csv" {
+                    &["csv"]
+                } else {
+                    &["json"]
+                },
+            )
             .set_file_name(&export.filename)
             .blocking_save_file();
         let Some(selected) = selected else {
@@ -103,6 +106,29 @@ async fn save_export(
     })
     .await
     .map_err(|_| unavailable())?
+}
+
+fn generate_export(
+    service: &RegisterService,
+    kind: &str,
+    range: Option<SalesReportInput>,
+) -> Result<gram_register_service::ExportFile, CommandError> {
+    match kind {
+        "backup" => Ok(service.export_backup()?),
+        "sales" => Ok(service.export_sales()?),
+        "sales_report_csv" => {
+            Ok(
+                service.export_sales_report_csv(range.ok_or_else(|| CommandError {
+                    code: "INVALID_INPUT".into(),
+                    message: "Choose an explicit UTC report date range.".into(),
+                })?)?,
+            )
+        }
+        _ => Err(CommandError {
+            code: "INVALID_EXPORT".into(),
+            message: "Choose a backup, sales JSON, or sales report CSV export.".into(),
+        }),
+    }
 }
 
 fn write_new_export(path: &std::path::Path, content: &[u8]) -> Result<(), CommandError> {
@@ -163,6 +189,35 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_exports_require_fixed_kind_and_validated_dates() {
+        let service = RegisterService::in_memory().unwrap();
+        assert_eq!(
+            generate_export(&service, "other.csv", None)
+                .unwrap_err()
+                .code,
+            "INVALID_EXPORT"
+        );
+        assert_eq!(
+            generate_export(&service, "sales_report_csv", None)
+                .unwrap_err()
+                .code,
+            "INVALID_INPUT"
+        );
+        let export = generate_export(
+            &service,
+            "sales_report_csv",
+            Some(SalesReportInput {
+                start_date: "2026-01-01".into(),
+                end_date: "2026-01-02".into(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(export.filename, "gram-pos-sales-report.csv");
+        assert_eq!(export.media_type, "text/csv;charset=utf-8");
+        assert!(export.content.starts_with("\"record_type\""));
+    }
 
     #[test]
     fn exports_never_replace_existing_files() {

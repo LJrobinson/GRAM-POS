@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { command, RegisterError } from './api';
+import { SalesReportPanel } from './SalesReport';
+import { exportSalesReport } from './reportExport';
 import { LedgerForm, LedgerPanel, type LedgerAction } from './CashLedger';
 import { readLedgerAttempt, sameCurrency, type CashLedger, type LedgerAttempt } from './ledger';
+import { ReceiptContent } from './Receipt';
 import { Icon } from './Icon';
 import { activeCatalog, newGroup } from './catalog';
 import { CatalogEditor, ExportPanel, BlankSetup } from './CatalogEditor';
@@ -14,7 +17,7 @@ function readPending(): CheckoutPayload | null { try { return JSON.parse(localSt
 function errorText(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong. Please try again.'; }
 function emptyCart() { return <div className="empty-cart"><div className="empty-symbol"><Icon name="bag" size={29}/></div><h3>A fresh start.</h3><p>Choose a product to begin.<br/>Every gram, accounted for.</p></div>; }
 
-function Modal({ title, subtitle, children, onClose, wide = false }: { title: string; subtitle?: string; children: ReactNode; onClose?: () => void; wide?: boolean }) {
+function Modal({ title, subtitle, children, onClose, wide = false, className = '' }: { title: string; subtitle?: string; children: ReactNode; onClose?: () => void; wide?: boolean; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -32,21 +35,23 @@ function Modal({ title, subtitle, children, onClose, wide = false }: { title: st
     document.addEventListener('keydown', key);
     return () => { document.removeEventListener('keydown', key); previous?.focus(); };
   }, [onClose]);
-  return <div className="modal-backdrop"><div role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref} className={`modal ${wide ? 'modal-wide' : ''}`}><div className="modal-head"><div><span className="eyebrow">GRAM / REGISTER</span><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{onClose && <button className="icon-button" aria-label="Close dialog" onClick={onClose}><Icon name="close"/></button>}</div>{children}</div></div>;
+  return <div className={`modal-backdrop ${className}`}><div role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref} className={`modal ${wide ? 'modal-wide' : ''}`}><div className="modal-head"><div><span className="eyebrow">GRAM / REGISTER</span><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{onClose && <button className="icon-button" aria-label="Close dialog" onClick={onClose}><Icon name="close"/></button>}</div>{children}</div></div>;
 }
 
 export default function App() {
   const [state, setState] = useState<RegisterState | null>(null);
   const [booting, setBooting] = useState(true);
   const [bootError, setBootError] = useState('');
-  const [page, setCurrentPage] = useState<'register' | 'history' | 'settings' | 'cash'>('register');
+  const [page, setCurrentPage] = useState<'register' | 'history' | 'settings' | 'cash' | 'reports'>('register');
   const [ledger, setLedger] = useState<CashLedger | null>(null);
   const [ledgerError, setLedgerError] = useState('');
   const [ledgerAction, setLedgerAction] = useState<LedgerAction | null>(null);
   const [ledgerAttempt, setLedgerAttempt] = useState<LedgerAttempt | null>(readLedgerAttempt);
   const refreshLedger = async () => { try { setLedger(await command<CashLedger>('get_cash_ledger')); setLedgerError(''); } catch (e) { setLedger(null); setLedgerError(errorText(e)); } };
   const [settingsDirty, setSettingsDirty] = useState(false);
-  const setPage = (next: typeof page) => { if (next !== page && settingsDirty && !window.confirm('Discard unsaved configuration changes and leave Configuration?')) return; if (next !== page) setSettingsDirty(false); setCurrentPage(next); };
+  const reportReceiptRequest = useRef(0);
+  const pageRef = useRef(page);
+  const setPage = (next: typeof page) => { if (next !== page && settingsDirty && !window.confirm('Discard unsaved configuration changes and leave Configuration?')) return; if (next !== page) { setSettingsDirty(false); reportReceiptRequest.current += 1; } pageRef.current = next; setCurrentPage(next); };
   useEffect(() => { const warn = (event: BeforeUnloadEvent) => { if (settingsDirty) { event.preventDefault(); event.returnValue = ''; } }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [settingsDirty]);
   const [lines, setLines] = useState<CartLine[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -80,7 +85,7 @@ export default function App() {
     finally { setBooting(false); }
   };
   useEffect(() => { void loadState(); }, []);
-  useEffect(() => { if (state?.configured && (page === 'cash' || page === 'history')) void refreshLedger(); }, [page, state?.configured]);
+  useEffect(() => { if (state?.configured && (page === 'cash' || page === 'history' || page === 'reports')) void refreshLedger(); }, [page, state?.configured]);
   useEffect(() => {
     if (booting || !state?.configured) return;
     if (lines.length === 0) { setQuote(null); setPricing(false); setQuoteError(''); return; }
@@ -134,12 +139,12 @@ export default function App() {
     <aside className="sidebar">
       <a className="brand" href="#" onClick={event => { event.preventDefault(); setPage('register'); }} aria-label="GRAM register"><span className="brand-mark">g<span>•</span></span><span className="brand-name">GRAM<span>POINT OF SALE</span></span></a>
       <div className="workspace-label">YOUR WORKSPACE</div>
-      <nav aria-label="Main navigation">{([['register', 'register', 'Register'], ['history', 'history', 'Sales history'], ['cash', 'cash', 'Cash sessions'], ['settings', 'settings', 'Configuration']] as const).map(([id, icon, text]) => <button key={id} aria-label={text} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => setPage(id)}><Icon name={icon}/><span>{text}</span>{page === id && <span className="active-dot"/>}</button>)}</nav>
+      <nav aria-label="Main navigation">{([['register', 'register', 'Register'], ['history', 'history', 'Sales history'], ['cash', 'cash', 'Cash sessions'], ['reports', 'receipt', 'Reports'], ['settings', 'settings', 'Configuration']] as const).map(([id, icon, text]) => <button key={id} aria-label={text} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => setPage(id)}><Icon name={icon}/><span>{text}</span>{page === id && <span className="active-dot"/>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="local-note"><span className={`status-dot ${bootError ? 'offline' : ''}`}/><div><strong>{bootError ? 'Service unavailable' : 'Local-first register'}</strong><span>Your data stays on this device</span></div></div><div className="station"><span className="station-avatar">01</span><div><strong>Register 01</strong><span>Demo workspace</span></div><Icon name="lock" size={15}/></div></div>
     </aside>
     <main className="main-content">
-      <header className="topbar"><div className="breadcrumb">WORKSPACE <span>/</span> {page === 'register' ? 'REGISTER' : page === 'history' ? 'SALES HISTORY' : page === 'cash' ? 'CASH SESSIONS' : 'CONFIGURATION'}</div><div className="topbar-right"><span className="training-badge"><span/>TRAINING MODE</span><span className="today">{new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span></div></header>
-      {booting ? <div className="full-state"><div className="loading-wheel"/><h2>Opening your register</h2><p>Connecting to your local workspace…</p></div> : bootError ? <div className="full-state"><Icon name="info" size={40}/><h2>Let’s reconnect.</h2><p>{bootError}</p><button className="primary" onClick={() => void loadState()}><Icon name="refresh"/>Try again</button><small>Browser development needs the local Rust service on port 4174.</small></div> : !state?.configured ? <Welcome loading={demoLoading} error={notice} onInitialize={() => void initialize()} onBlank={currency => void initialize(currency)}/> : page === 'history' ? <History onReceipt={setReceipt} ledger={ledger}/> : page === 'cash' ? <LedgerPanel ledger={ledger} error={ledgerError} onRefresh={() => void refreshLedger()} onAction={setLedgerAction} currency={currency!} blocked={!!attempt || !!ledgerAttempt}/> : page === 'settings' ? <Settings onDirtyChange={setSettingsDirty} revision={state.config_revision} config={state.config!} hasCart={lines.length > 0 || !!attempt} onSave={next => { setState(next); setNotice('Saved configuration loaded. New quotes use these rules.'); }}/> : <div className="register-layout">
+      <header className="topbar"><div className="breadcrumb">WORKSPACE <span>/</span> {page === 'register' ? 'REGISTER' : page === 'history' ? 'SALES HISTORY' : page === 'cash' ? 'CASH SESSIONS' : page === 'reports' ? 'REPORTS' : 'CONFIGURATION'}</div><div className="topbar-right"><span className="training-badge"><span/>TRAINING MODE</span><span className="today">{new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span></div></header>
+      {booting ? <div className="full-state"><div className="loading-wheel"/><h2>Opening your register</h2><p>Connecting to your local workspace…</p></div> : bootError ? <div className="full-state"><Icon name="info" size={40}/><h2>Let’s reconnect.</h2><p>{bootError}</p><button className="primary" onClick={() => void loadState()}><Icon name="refresh"/>Try again</button><small>Browser development needs the local Rust service on port 4174.</small></div> : !state?.configured ? <Welcome loading={demoLoading} error={notice} onInitialize={() => void initialize()} onBlank={currency => void initialize(currency)}/> : page === 'history' ? <History onReceipt={saved => { setLedger(null); setReceipt(saved); void refreshLedger(); }} ledger={ledger}/> : page === 'cash' ? <LedgerPanel ledger={ledger} error={ledgerError} onRefresh={() => void refreshLedger()} onAction={setLedgerAction} currency={currency!} blocked={!!attempt || !!ledgerAttempt}/> : page === 'reports' ? <SalesReportPanel onExport={exportSalesReport} onOpenReceipt={async saleId => { const request = ++reportReceiptRequest.current; const saved = await command<Receipt>('get_receipt', { sale_id: saleId }); if (request !== reportReceiptRequest.current || pageRef.current !== 'reports') return; await refreshLedger(); if (request === reportReceiptRequest.current && pageRef.current === 'reports') setReceipt(saved); }}/> : page === 'settings' ? <Settings onDirtyChange={setSettingsDirty} revision={state.config_revision} config={state.config!} hasCart={lines.length > 0 || !!attempt} onSave={next => { setState(next); setNotice('Saved configuration loaded. New quotes use these rules.'); }}/> : <div className="register-layout">
         <section className="catalog-area">
           <div className="page-heading"><div><span className="eyebrow">A LITTLE PRECISION. A LOT OF POSSIBILITY.</span><h1>Let’s ring it up<span className="emerald">.</span></h1><p>Measured by weight. Priced with confidence.</p></div><span className="catalog-count">{catalog.length} products</span></div>
           <div className="drawer-status"><span>{ledger?.active_session ? `Cash session open · ${money(ledger.active_session.expected_cash_minor, ledger.active_session.currency)} expected` : ledgerError ? 'Cash session unavailable' : 'Open a cash session before checkout'}</span><button className="secondary" onClick={() => setPage('cash')}>Manage cash</button></div><div className="search-field"><Icon name="search"/><input aria-label="Search products" placeholder="Search products or SKU…" value={query} onChange={event => setQuery(event.target.value)}/>{query && <button className="icon-button compact" aria-label="Clear search" onClick={() => setQuery('')}><Icon name="close" size={16}/></button>}<span className="search-hint">CATALOG</span></div>
@@ -161,7 +166,7 @@ export default function App() {
     {(ledgerAction || ledgerAttempt) && <Modal title={ledgerAttempt ? 'Recover cash action' : ledgerAction?.kind === 'refund' ? 'Full receipt refund' : ledgerAction?.kind === 'close' ? 'Close cash session' : 'Open cash session'}><LedgerForm action={ledgerAction} pending={ledgerAttempt} onPending={setLedgerAttempt} onCancel={() => { setLedgerAction(null); void refreshLedger(); }} onDone={message => { setLedgerAction(null); setNotice(message); setPage('cash'); void refreshLedger(); }}/></Modal>}
     {selected && <ProductModal product={selected} config={state!.config!} onClose={() => setSelected(null)} onAdd={value => addProduct(selected, value)}/>}
     {checkout && (quote || attempt) && <CashCheckout total={attempt?.expected_total_minor || quote!.total_minor} currency={attempt?.expected_currency || currency!} attempt={attempt} onClose={() => setCheckout(false)} onSubmit={finishSale} onRevise={reviseAttempt}/>}
-    {receipt && <ReceiptModal receipt={receipt} ledger={ledger} blocked={!!attempt || !!ledgerAttempt} onRefund={() => { if (ledger?.active_session) { setLedgerAction({ kind: 'refund', receipt, session: ledger.active_session }); setReceipt(null); } }} onClose={() => setReceipt(null)}/>}
+    {receipt && <ReceiptModal key={receipt.sale_id} receipt={receipt} ledger={ledger} blocked={!!attempt || !!ledgerAttempt} onRefund={() => { if (ledger?.active_session) { setLedgerAction({ kind: 'refund', receipt, session: ledger.active_session }); setReceipt(null); } }} onClose={() => setReceipt(null)}/>}
   </div>;
 }
 
@@ -206,8 +211,7 @@ function History({ onReceipt, ledger }: { onReceipt: (receipt: Receipt) => void;
 }
 
 function ReceiptModal({ receipt, onClose, ledger, blocked, onRefund }: { receipt: Receipt; onClose: () => void; ledger: CashLedger | null; blocked: boolean; onRefund: () => void }) {
-  const { quote } = receipt;
-  return <Modal title="Sale saved." subtitle="Your local receipt is ready." onClose={onClose}><div className="receipt-paper" id="print-receipt"><div className="receipt-brand">GRAM<span>DEMO / TRAINING RECEIPT</span></div><div className="receipt-meta"><strong>{receipt.receipt_number}</strong><span>{dateTime(receipt.created_at_unix)}</span></div><div className="saved-badge"><Icon name="check" size={14}/>Saved locally · cash</div><div className="receipt-lines">{quote.lines.map(line => <div key={line.id}><span><strong>{line.name}</strong><small>{quantityLabel(line.quantity, line.declared_content_grams)}</small></span><strong>{money(line.amount_minor, quote.currency)}</strong></div>)}</div>{quote.groups.map(group => <div className="receipt-group" key={group.group_id}><strong>{group.schedule.name || group.group_id}</strong><span>{group.eligible_grams} g eligible · {group.selected_nominal_grams} g tier</span><span>Measured: {group.actual_measured_grams} g · Declared: {group.declared_package_grams} g</span><span>Tolerance: +{group.tolerance_grams} g · Billable: {group.billable_grams} g</span><span>{ruleNames[group.rule] || group.rule}</span></div>)}<div className="receipt-totals"><div><span>Subtotal</span><strong>{money(quote.total_minor, quote.currency)}</strong></div><div className="muted"><span>Tax</span><span>Not configured · demo</span></div><div className="receipt-total"><span>Total</span><strong>{money(quote.total_minor, quote.currency)}</strong></div><div><span>Cash received</span><strong>{money(receipt.tender_minor, quote.currency)}</strong></div><div className="change-row"><span>Change due</span><strong>{money(receipt.change_minor, quote.currency)}</strong></div></div><p className="receipt-fine">Training only. Not a tax or compliance receipt.<br/>Exact quantities. Clear records.</p></div><div className="refund-status">{ledger?.refunds.some(r => r.sale_id === receipt.sale_id) ? <p>Fully refunded · original receipt preserved</p> : <><button className="secondary full-width" disabled={blocked || !ledger?.active_session || !sameCurrency(ledger.active_session.currency, quote.currency)} onClick={onRefund}>Refund full receipt</button><p>{!ledger?.active_session ? 'Open a cash session to refund.' : !sameCurrency(ledger.active_session.currency, quote.currency) ? 'Refund unavailable: drawer and receipt currencies differ.' : 'Full cash refund only · no stock return'}</p></>}{ledger && !ledger.sale_sessions.some(link => link.sale_id === receipt.sale_id) && <p>Legacy sale: not included in drawer sales totals.</p>}</div><div className="receipt-actions"><button className="secondary" onClick={() => window.print()}><Icon name="receipt" size={18}/>Print receipt</button><button className="primary" onClick={onClose}>Done<Icon name="arrow" size={17}/></button></div></Modal>;
+  return <Modal title="Sale saved." subtitle="Your local receipt is ready." onClose={onClose} className="receipt-modal-backdrop"><ReceiptContent receipt={receipt} ledger={ledger} blocked={blocked} onRefund={onRefund} onClose={onClose}/></Modal>;
 }
 
 function Settings({ config, revision, hasCart, onSave, onDirtyChange }: { onDirtyChange: (dirty: boolean) => void; config: Config; revision: string; hasCart: boolean; onSave: (state: RegisterState) => void }) {

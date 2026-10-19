@@ -1,6 +1,6 @@
 # GRAM POS desktop host
 
-Milestone 3 is a local development register, not a production payment or
+GRAM POS is a local development register, not a production payment or
 compliance product. Windows is the first packaged target. There is no shipped
 iPad application, sync, card processing, inventory ledger, or fiscal integration.
 
@@ -90,3 +90,9 @@ open, recognized schema-1 databases migrate transactionally to schema 2 without
 rewriting old receipts. Keep a pre-upgrade backup and do not reopen the upgraded
 file with an older app. The existing bounded IPC command handles the ledger;
 no new filesystem/network permissions or payment integration are added.
+
+## Milestone 5 receipt printing and CSV
+
+The saved-receipt view uses a user-triggered `window.print()` call, following Tauri's printing guidance. Scoped print CSS includes only the selected original receipt, not the rest of the register. Current refund status is a separate screen-only section, not part of the original printed sale. No printer plugin, silent printing, new native print command, or filesystem grants are added. Closing or canceling the system print dialog does not change stored records. Browser PDF checks are not a physical-printer or native-device test.
+
+`save_export` also accepts the fixed `sales_report_csv` kind with an explicit `range` containing UTC `start_date` and exclusive `end_date`. Rust validates the dates and creates the bytes; web content cannot pass arbitrary bytes or a destination path. The OS picker selects a new CSV filename, existing files are never replaced, and cancellation writes nothing. Backup/JSON export and offline recovery semantics are unchanged. See [receipt/report details](../../../docs/receipts-and-reports.md).
