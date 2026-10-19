@@ -4,6 +4,16 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Record cash added or removed (milestone 10)
+
+Version **0.10.0** adds explicit **Paid in** and **Paid out** records for an open cash session. Enter an exact positive amount and required nonpersonal reason, review the details, then confirm. Cancel writes nothing. Each committed adjustment is an immutable record with its own identity and retry key, not a sale, refund, receipt, tax or inventory event.
+
+Expected drawer cash is **opening float + cash sales − cash refunds + paid-ins − paid-outs**. Paid-ins/out do not change revenue. A conservative paid-out limit refuses amounts above current expected cash; it does not verify the physical drawer or provide an accounting policy. Closed sessions cannot be changed, and a stale closing review is rejected even when intervening adjustments net to zero. Lost responses can be reconciled with the same saved request after reload or restart.
+
+The cash view separates every total and shows movement reasons and event details in the configured store timezone. Schema/backup v4 preserves the ledger and parked-cart recovery in one consistent snapshot; recovery still accepts v1/v2/v3 backups without rewriting historical receipts. See the [cash workflow and limits](docs/cash-sessions.md), [backup guide](docs/backup.md) and [validation status](VALIDATION.md).
+
+Desktop and phone browser scenarios are included for reviewed paid-ins, recorded paid-outs and closing/history. Current milestone-10 screenshots will be added only from verified passing real-Rust CI artifacts. The earlier screenshots below retain their original milestone labels. This prototype does not move real money or activate cash-drawer hardware.
+
 ## Park a cart and return to it (milestone 9)
 
 Version **0.9.0** adds durable local parked carts. Save a nonempty cart with an optional short, nonpersonal label, continue another sale, then preview and resume the saved quantities. The preview uses **current catalog and prices**, not a promise to hold a price. Measured grams, package counts and unit counts remain separate; unavailable products and changed product types are flagged rather than silently removed or reinterpreted.
@@ -279,9 +289,9 @@ Version **0.4.0** adds a training-only cash ledger without rewriting any sale:
 - Count the drawer, review the variance, then close the session permanently. Sales/refunds cannot be added to closed sessions. Historical refunds belong to the currently open session, not the original closed drawer.
 - Preserve original receipts, session history, refund records, and retry identities through restart and portable backup/recovery.
 
-Sessions snapshot currency and precision. Close the session before changing currency; refunds must match the active session's currency and precision. Old receipts without a session stay visible as legacy history and are never added to a new drawer's sales. Partial refunds, cash pay-ins/pay-outs, live payment refunds, inventory adjustments, user authentication, taxes, synchronization, and production/fiscal certification are not implemented.
+Sessions snapshot currency and precision. Close the session before changing currency; refunds must match the active session's currency and precision. Old receipts without a session stay visible as legacy history and are never added to a new drawer's sales. Partial refunds, live payment refunds, inventory adjustments, user authentication, taxes, synchronization, and production/fiscal certification are not implemented. Cash paid-in/out records were added in milestone 10 above.
 
-The service explicitly migrates recognized schema 1/2 stores to schema 3 while leaving their receipt/request bytes intact. The recovery tool accepts older v1/v2 backups and v3 backups containing durable draft identity, parked carts and recovery keys. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
+The service explicitly migrates recognized schema 1/2/3 stores to schema 4 while leaving their receipt/request bytes intact. The recovery tool accepts older v1/v2/v3 backups and v4 backups containing durable draft identity, parked carts, cash movements and recovery keys. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
 
 The earlier register/catalog/cash-session screenshots are original milestone-4 browser captures; the receipt/report section is labeled milestone 5. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
 

@@ -236,6 +236,8 @@ fn legacy_sales_count_once_with_new_sales_and_refunds() {
         "refunds_sequence",
         "legacy_sale_max_id",
         "draft_workflow",
+        "cash_movements",
+        "cash_movements_sequence",
     ] {
         saved.as_object_mut().unwrap().remove(key);
     }

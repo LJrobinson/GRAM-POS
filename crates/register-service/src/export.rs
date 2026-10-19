@@ -52,6 +52,17 @@ struct RefundBackup {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct CashMovementBackup {
+    id: String,
+    session_id: String,
+    idempotency_key: String,
+    request_json: String,
+    movement_json: String,
+    sales_watermark: String,
+    refunds_watermark: String,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Backup {
     format: String,
     format_version: u32,
@@ -76,6 +87,10 @@ struct Backup {
     legacy_sale_max_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     draft_workflow: Option<drafts::DraftBackup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cash_movements: Option<Vec<CashMovementBackup>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cash_movements_sequence: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,7 +118,7 @@ impl Backup {
         if self.format != "gram-pos-backup"
             || !matches!(
                 (self.format_version, self.schema_version),
-                (1, 1) | (2, 2) | (3, 3)
+                (1, 1) | (2, 2) | (3, 3) | (4, 4)
             )
         {
             return Err(corrupt());
@@ -170,7 +185,7 @@ impl Backup {
                 return Err(corrupt());
             }
         }
-        if self.format_version == 3 {
+        if self.format_version >= 3 {
             let workflow = self.draft_workflow.as_ref().ok_or_else(corrupt)?;
             let draft = self
                 .draft_json
@@ -211,6 +226,16 @@ impl Backup {
         self.validate_ledger()
     }
     fn validate_ledger(&self) -> Result<(), ServiceError> {
+        if self.format_version < 4
+            && (self.cash_movements.is_some() || self.cash_movements_sequence.is_some())
+        {
+            return Err(corrupt());
+        }
+        if self.format_version == 4
+            && (self.cash_movements.is_none() || self.cash_movements_sequence.is_none())
+        {
+            return Err(corrupt());
+        }
         if self.format_version == 1 {
             if self.cash_sessions.is_some()
                 || self.cash_closes.is_some()
@@ -260,6 +285,8 @@ impl Backup {
                 || session.expected_cash_minor != amount.to_string()
                 || session.sales_total_minor != "0"
                 || session.refunds_total_minor != "0"
+                || session.paid_in_total_minor != "0"
+                || session.paid_out_total_minor != "0"
                 || session.movement_count != "0"
                 || session.closed_at_unix.is_some()
                 || session.counted_minor.is_some()
@@ -315,8 +342,10 @@ impl Backup {
                 decode_stored::<Receipt>(&row.receipt_json)?,
             );
         }
-        let mut totals: BTreeMap<i64, (i128, i128, u64)> =
-            opened.keys().map(|id| (*id, (0, 0, 0))).collect();
+        let mut totals: BTreeMap<i64, cash_movements::Totals> = opened
+            .keys()
+            .map(|id| (*id, cash_movements::Totals::default()))
+            .collect();
         let mut mapped = BTreeMap::new();
         for row in mappings {
             let sale_id = integer(&row.sale_id)?;
@@ -345,13 +374,8 @@ impl Backup {
             }
             integer(&sale.created_at_unix)?;
             let sum = totals.get_mut(&session_id).ok_or_else(corrupt)?;
-            sum.0 = sum
-                .0
-                .checked_add(i128::from(
-                    parse_integer(&sale.quote.total_minor, "Total").map_err(|_| corrupt())?,
-                ))
-                .ok_or_else(corrupt)?;
-            sum.2 = sum.2.checked_add(1).ok_or_else(corrupt)?;
+            sum.add_sale(parse_integer(&sale.quote.total_minor, "Total").map_err(|_| corrupt())?)
+                .map_err(|_| corrupt())?;
         }
         if sales
             .keys()
@@ -418,13 +442,8 @@ impl Backup {
             refund_sessions.insert(id, session_id);
             integer(&receipt.created_at_unix)?;
             let sum = totals.get_mut(&session_id).ok_or_else(corrupt)?;
-            sum.1 = sum
-                .1
-                .checked_add(i128::from(
-                    parse_integer(&receipt.amount_minor, "Refund").map_err(|_| corrupt())?,
-                ))
-                .ok_or_else(corrupt)?;
-            sum.2 = sum.2.checked_add(1).ok_or_else(corrupt)?;
+            sum.add_refund(parse_integer(&receipt.amount_minor, "Refund").map_err(|_| corrupt())?)
+                .map_err(|_| corrupt())?;
         }
         if refund_sessions
             .values()
@@ -433,15 +452,15 @@ impl Backup {
         {
             return Err(corrupt());
         }
+        self.validate_movements(&opened, &mapped, &sales, &mut totals)?;
         for (id, session) in closed {
-            let (sales, refunds, count) = totals.get(&id).ok_or_else(corrupt)?;
+            let sum = totals.get(&id).ok_or_else(corrupt)?;
             let opening = i128::from(
                 parse_integer(&session.opening_float_minor, "Float").map_err(|_| corrupt())?,
             );
-            let expected = opening
-                .checked_add(*sales)
-                .and_then(|v| v.checked_sub(*refunds))
-                .ok_or_else(corrupt)?;
+            let expected = sum
+                .expected(u64::try_from(opening).map_err(|_| corrupt())?)
+                .map_err(|_| corrupt())?;
             let counted = i128::from(
                 parse_integer(
                     session.counted_minor.as_deref().ok_or_else(corrupt)?,
@@ -450,14 +469,155 @@ impl Backup {
                 .map_err(|_| corrupt())?,
             );
             let variance = counted.checked_sub(expected).ok_or_else(corrupt)?;
-            if session.sales_total_minor != sales.to_string()
-                || session.refunds_total_minor != refunds.to_string()
-                || session.movement_count != count.to_string()
+            if session.sales_total_minor != sum.sales.to_string()
+                || session.refunds_total_minor != sum.refunds.to_string()
+                || session.paid_in_total_minor != sum.paid_in.to_string()
+                || session.paid_out_total_minor != sum.paid_out.to_string()
+                || session.movement_count != sum.count.to_string()
                 || session.expected_cash_minor != expected.to_string()
                 || session.variance_minor.as_deref() != Some(variance.to_string().as_str())
             {
                 return Err(corrupt());
             }
+        }
+        Ok(())
+    }
+    fn validate_movements(
+        &self,
+        opened: &BTreeMap<i64, CashSession>,
+        mapped: &BTreeMap<i64, i64>,
+        sales: &BTreeMap<i64, Receipt>,
+        totals: &mut BTreeMap<i64, cash_movements::Totals>,
+    ) -> Result<(), ServiceError> {
+        if self.format_version < 4 {
+            return Ok(());
+        }
+        let sequence = integer(
+            self.cash_movements_sequence
+                .as_deref()
+                .ok_or_else(corrupt)?,
+        )?;
+        let mut movement_rows = BTreeMap::new();
+        let mut keys = BTreeSet::new();
+        for row in self.cash_movements.as_ref().ok_or_else(corrupt)? {
+            let id = integer(&row.id)?;
+            if id < 1
+                || id > sequence
+                || movement_rows.insert(id, row).is_some()
+                || !keys.insert(&row.idempotency_key)
+            {
+                return Err(corrupt());
+            }
+        }
+        let refund_rows: BTreeMap<i64, (i64, i64, RefundReceipt)> = self
+            .refunds
+            .as_ref()
+            .ok_or_else(corrupt)?
+            .iter()
+            .map(|row| {
+                Ok((
+                    integer(&row.id)?,
+                    (
+                        integer(&row.sale_id)?,
+                        integer(&row.session_id)?,
+                        decode_stored(&row.receipt_json)?,
+                    ),
+                ))
+            })
+            .collect::<Result<_, ServiceError>>()?;
+        let mut prior_session = 0;
+        let mut prior_sales = 0;
+        let mut prior_refunds = 0;
+        let mut adjustments: BTreeMap<i64, cash_movements::Totals> = BTreeMap::new();
+        for (id, row) in movement_rows {
+            let session_id = integer(&row.session_id)?;
+            let session = opened.get(&session_id).ok_or_else(corrupt)?;
+            let request: CashMovementInput = decode_stored(&row.request_json)?;
+            let movement: CashMovement = decode_stored(&row.movement_json)?;
+            let amount =
+                parse_integer(&request.amount_minor, "Cash amount").map_err(|_| corrupt())?;
+            validate_id(&row.idempotency_key, "Cash movement key").map_err(|_| corrupt())?;
+            cash_movements::validate_reason(&request.reason).map_err(|_| corrupt())?;
+            integer(&movement.created_at_unix)?;
+            if amount == 0
+                || request.idempotency_key != row.idempotency_key
+                || request.expected_session_id != row.session_id
+                || request.expected_currency != session.currency
+                || movement.movement_id != id.to_string()
+                || movement.session_id != row.session_id
+                || movement.kind != request.kind
+                || movement.amount_minor != amount.to_string()
+                || movement.reason != request.reason
+                || movement.currency != session.currency
+                || session_id < prior_session
+            {
+                return Err(corrupt());
+            }
+            let sales_watermark = integer(&row.sales_watermark)?;
+            let refunds_watermark = integer(&row.refunds_watermark)?;
+            if sales_watermark < prior_sales
+                || refunds_watermark < prior_refunds
+                || (sales_watermark != 0 && !sales.contains_key(&sales_watermark))
+                || (refunds_watermark != 0 && !refund_rows.contains_key(&refunds_watermark))
+            {
+                return Err(corrupt());
+            }
+            let mut before = cash_movements::Totals::default();
+            // Every earlier session has ended; no later session may have begun.
+            for (sale_id, sale) in sales {
+                let source_session = mapped.get(sale_id).copied().unwrap_or(0);
+                if (source_session < session_id && *sale_id > sales_watermark)
+                    || (source_session > session_id && *sale_id <= sales_watermark)
+                {
+                    return Err(corrupt());
+                }
+                if source_session == session_id && *sale_id <= sales_watermark {
+                    before
+                        .add_sale(
+                            parse_integer(&sale.quote.total_minor, "Sale total")
+                                .map_err(|_| corrupt())?,
+                        )
+                        .map_err(|_| corrupt())?;
+                }
+            }
+            for (refund_id, (sale_id, source_session, refund)) in &refund_rows {
+                if (*source_session < session_id && *refund_id > refunds_watermark)
+                    || (*source_session > session_id && *refund_id <= refunds_watermark)
+                    || (*refund_id <= refunds_watermark && *sale_id > sales_watermark)
+                {
+                    return Err(corrupt());
+                }
+                if *source_session == session_id && *refund_id <= refunds_watermark {
+                    before
+                        .add_refund(
+                            parse_integer(&refund.amount_minor, "Refund total")
+                                .map_err(|_| corrupt())?,
+                        )
+                        .map_err(|_| corrupt())?;
+                }
+            }
+            let prior = adjustments.entry(session_id).or_default();
+            before.paid_in = prior.paid_in;
+            before.paid_out = prior.paid_out;
+            let available = before
+                .expected(
+                    parse_integer(&session.opening_float_minor, "Float").map_err(|_| corrupt())?,
+                )
+                .map_err(|_| corrupt())?;
+            if movement.kind == CashMovementKind::PaidOut && i128::from(amount) > available {
+                return Err(corrupt());
+            }
+            prior
+                .add_movement(movement.kind, amount)
+                .map_err(|_| corrupt())?;
+            totals
+                .get_mut(&session_id)
+                .ok_or_else(corrupt)?
+                .add_movement(movement.kind, amount)
+                .map_err(|_| corrupt())?;
+            prior_session = session_id;
+            prior_sales = sales_watermark;
+            prior_refunds = refunds_watermark;
         }
         Ok(())
     }
@@ -574,6 +734,23 @@ impl RegisterService {
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
+        let cash_movements = {
+            let mut stmt = tx.prepare("SELECT id,session_id,idempotency_key,request_json,movement_json,sales_watermark,refunds_watermark FROM cash_movements ORDER BY id")?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(CashMovementBackup {
+                        id: r.get::<_, i64>(0)?.to_string(),
+                        session_id: r.get::<_, i64>(1)?.to_string(),
+                        idempotency_key: r.get(2)?,
+                        request_json: r.get(3)?,
+                        movement_json: r.get(4)?,
+                        sales_watermark: r.get::<_, i64>(5)?.to_string(),
+                        refunds_watermark: r.get::<_, i64>(6)?.to_string(),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
         let ledger_sequence = |name: &str| -> Result<String, ServiceError> {
             Ok(tx
                 .query_row(
@@ -592,7 +769,7 @@ impl RegisterService {
         )?;
         let backup = Backup {
             format: "gram-pos-backup".into(),
-            format_version: 3,
+            format_version: 4,
             schema_version: SCHEMA_VERSION,
             settings,
             draft_json,
@@ -606,6 +783,8 @@ impl RegisterService {
             refunds_sequence: Some(ledger_sequence("refunds")?),
             legacy_sale_max_id: Some(legacy.to_string()),
             draft_workflow: Some(drafts::backup(&tx)?),
+            cash_movements: Some(cash_movements),
+            cash_movements_sequence: Some(ledger_sequence("cash_movements")?),
         };
         backup.validate()?;
         tx.commit()?;
@@ -695,15 +874,50 @@ impl RegisterService {
                 (parse_integer(&session.movement_count, "Count").map_err(|_| corrupt())? + 1)
                     .to_string();
         }
+        let cash_movements = backup
+            .cash_movements
+            .as_ref()
+            .ok_or_else(corrupt)?
+            .iter()
+            .map(|row| decode_stored::<CashMovement>(&row.movement_json))
+            .collect::<Result<Vec<_>, _>>()?;
+        for movement in &cash_movements {
+            let session = sessions.get_mut(&movement.session_id).ok_or_else(corrupt)?;
+            let amount = i128::from(
+                parse_integer(&movement.amount_minor, "Cash amount").map_err(|_| corrupt())?,
+            );
+            let total = match movement.kind {
+                CashMovementKind::PaidIn => &mut session.paid_in_total_minor,
+                CashMovementKind::PaidOut => &mut session.paid_out_total_minor,
+            };
+            *total = total
+                .parse::<i128>()
+                .map_err(|_| corrupt())?
+                .checked_add(amount)
+                .ok_or_else(corrupt)?
+                .to_string();
+            session.movement_count = parse_integer(&session.movement_count, "Count")
+                .map_err(|_| corrupt())?
+                .checked_add(1)
+                .ok_or_else(corrupt)?
+                .to_string();
+        }
         for session in sessions.values_mut() {
             let opening = i128::from(
                 parse_integer(&session.opening_float_minor, "Float").map_err(|_| corrupt())?,
             );
             let sales: i128 = session.sales_total_minor.parse().map_err(|_| corrupt())?;
             let refunds: i128 = session.refunds_total_minor.parse().map_err(|_| corrupt())?;
+            let paid_in: i128 = session.paid_in_total_minor.parse().map_err(|_| corrupt())?;
+            let paid_out: i128 = session
+                .paid_out_total_minor
+                .parse()
+                .map_err(|_| corrupt())?;
             session.expected_cash_minor = opening
                 .checked_add(sales)
                 .and_then(|v| v.checked_sub(refunds))
+                .and_then(|v| v.checked_add(paid_in))
+                .and_then(|v| v.checked_sub(paid_out))
                 .ok_or_else(corrupt)?
                 .to_string();
         }
@@ -717,8 +931,8 @@ impl RegisterService {
         sessions.sort_by_key(|session| integer(&session.session_id).unwrap_or(0));
         make_export(
             "gram-pos-sales.json",
-            &json!({"format":"gram-pos-sales","format_version":2,"receipts":receipts,
-                "refunds":refunds,"sessions":sessions,"sale_sessions":mappings}),
+            &json!({"format":"gram-pos-sales","format_version":3,"receipts":receipts,
+                "refunds":refunds,"sessions":sessions,"sale_sessions":mappings,"cash_movements":cash_movements}),
         )
     }
     /// Offline recovery only. Never opens or replaces an existing destination.
@@ -785,6 +999,9 @@ impl RegisterService {
             for row in backup.refunds.unwrap_or_default() {
                 tx.execute("INSERT INTO refunds(id,sale_id,session_id,idempotency_key,request_json,receipt_json) VALUES(?1,?2,?3,?4,?5,?6)",params![integer(&row.id)?,integer(&row.sale_id)?,integer(&row.session_id)?,row.idempotency_key,row.request_json,row.receipt_json])?;
             }
+            for row in backup.cash_movements.unwrap_or_default() {
+                tx.execute("INSERT INTO cash_movements(id,session_id,idempotency_key,request_json,movement_json,sales_watermark,refunds_watermark) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![integer(&row.id)?,integer(&row.session_id)?,row.idempotency_key,row.request_json,row.movement_json,integer(&row.sales_watermark)?,integer(&row.refunds_watermark)?])?;
+            }
             if let Some(workflow) = backup.draft_workflow {
                 workflow.restore(&tx)?;
             }
@@ -794,6 +1011,10 @@ impl RegisterService {
                     backup.cash_sessions_sequence.as_deref().unwrap_or("0"),
                 ),
                 ("refunds", backup.refunds_sequence.as_deref().unwrap_or("0")),
+                (
+                    "cash_movements",
+                    backup.cash_movements_sequence.as_deref().unwrap_or("0"),
+                ),
             ] {
                 tx.execute("DELETE FROM sqlite_sequence WHERE name=?1", [name])?;
                 tx.execute(

@@ -237,7 +237,7 @@ fn concurrent_sale_and_close_are_serialized_without_lost_cash() {
 
 fn make_v1(file: &std::path::Path) {
     let c = Connection::open(file).unwrap();
-    c.execute_batch("DROP TABLE draft_metadata; DROP TABLE draft_operations; DROP TABLE draft_records; DROP TABLE refunds; DROP TABLE sale_sessions; DROP TABLE cash_closes; DROP TABLE cash_sessions; DROP TABLE ledger_metadata; PRAGMA user_version=1;").unwrap();
+    c.execute_batch("DROP TABLE cash_movements; DROP TABLE draft_metadata; DROP TABLE draft_operations; DROP TABLE draft_records; DROP TABLE refunds; DROP TABLE sale_sessions; DROP TABLE cash_closes; DROP TABLE cash_sessions; DROP TABLE ledger_metadata; PRAGMA user_version=1;").unwrap();
 }
 #[test]
 fn explicit_v1_migration_preserves_legacy_receipts_without_inventing_drawers() {
@@ -273,7 +273,7 @@ fn explicit_v1_migration_preserves_legacy_receipts_without_inventing_drawers() {
     assert_eq!(
         c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
     assert_eq!(
         c.query_row("SELECT legacy_sale_max_id FROM ledger_metadata", [], |r| {

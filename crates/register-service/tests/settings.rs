@@ -86,13 +86,13 @@ fn genuine_pre_settings_fixtures_keep_bytes_and_default_only_for_display() {
     let old_backup = include_str!("fixtures/pre-settings-backup.json");
     RegisterService::restore_backup(old_backup, &destination).unwrap();
     let mut service = RegisterService::open(&destination).unwrap();
-    // The v3 envelope gains only its version and empty workflow section. Keep an
+    // The v4 envelope gains version and empty workflow/movement sections. Keep an
     // exact whole-file comparison so every legacy JSON byte remains covered.
     let expected = format!(
-        "{},\n  \"draft_workflow\": {{\n    \"metadata\": {{\n      \"revision\": \"0\",\n      \"next_id\": \"1\",\n      \"guarded\": false,\n      \"active_id\": null,\n      \"guarded_since_revision\": null\n    }},\n    \"records\": [],\n    \"operations\": []\n  }}\n}}\n",
+        "{},\n  \"draft_workflow\": {{\n    \"metadata\": {{\n      \"revision\": \"0\",\n      \"next_id\": \"1\",\n      \"guarded\": false,\n      \"active_id\": null,\n      \"guarded_since_revision\": null\n    }},\n    \"records\": [],\n    \"operations\": []\n  }},\n  \"cash_movements\": [],\n  \"cash_movements_sequence\": \"0\"\n}}\n",
         old_backup.strip_suffix("\n}\n").unwrap()
-            .replace("\"format_version\": 2", "\"format_version\": 3")
-            .replace("\"schema_version\": 2", "\"schema_version\": 3")
+            .replace("\"format_version\": 2", "\"format_version\": 4")
+            .replace("\"schema_version\": 2", "\"schema_version\": 4")
     );
     assert_eq!(service.export_backup().unwrap().content, expected);
     save(&mut service, settings("New identity"));

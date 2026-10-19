@@ -32,7 +32,7 @@ If another window changes the register, reload/review the authoritative cart aft
 
 ## Backup and reporting boundaries
 
-Schema 3 and portable backup v3 retain active/parked identities and draft operation history consistently with receipts and ledger records. The offline recovery tool also accepts older v1/v2 backups. Original historical request, receipt and snapshot JSON are preserved. Restore always creates a new database; stop the app before switching databases and keep the source backup. See [backup and recovery](backup.md).
+Schema 4 and portable backup v4 retain active/parked identities and draft operation history consistently with receipts and ledger records. The offline recovery tool also accepts older v1/v2/v3 backups. Original historical request, receipt and snapshot JSON are preserved. Restore always creates a new database; stop the app before switching databases and keep the source backup. See [backup and recovery](backup.md).
 
 Parked carts are not completed sales, receivables or revenue. They do not appear as sales in sales history, sales JSON, sales reports, refund totals or expected drawer cash. Ordinary checkout creates the sale exactly once; parking itself does not collect money, reserve stock or hold catalog prices.
 

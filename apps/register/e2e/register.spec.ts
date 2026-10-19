@@ -172,7 +172,7 @@ test('catalog editing, archives, atomic validation, conflict recovery and portab
     expect(await file.failure()).toBeNull();
     const data = JSON.parse(await readFile(testInfo.outputPath(file.suggestedFilename()), 'utf8'));
     expect(data.format).toBe(label === 'Download portable backup' ? 'gram-pos-backup' : 'gram-pos-sales');
-    expect(data.format_version).toBe(label === 'Download portable backup' ? 3 : 2);
+    expect(data.format_version).toBe(label === 'Download portable backup' ? 4 : 3);
     if (label === 'Download portable backup') expect(JSON.parse(data.settings.config_json).catalog[number - 1].name).toBe('Other window edit');
     else expect(data.receipts).toHaveLength((await api('list_sales')).sales.length);
   }

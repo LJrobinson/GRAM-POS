@@ -1,3 +1,41 @@
+# Milestone 10 validation
+
+Implemented from merged main `6407721177674a16c155e4c3ad91b1ebc5a54d0a` on 2026-10-19. Before editing, all **142 tracked local blobs**, including binary assets, matched remote tree `f3bd0ba072f26afcfe34b50403f47462a6e2e297`; an immutable baseline was retained. App version is **0.10.0**, SQLite/portable backup version is **4**, and separate sales JSON is version **3**. Legacy backup v1/v2/v3 recovery and historical receipt/request/session bytes remain supported. Pricing/config schemas are unchanged.
+
+## Scope and invariants
+
+Explicit reviewed/confirmed paid-in and paid-out entries during an open cash session, positive exact amounts, bounded nonpersonal reasons, independent immutable identities and retry keys, restart/restore reconciliation, exact drawer conservation, and closing revision protection. The conservative paid-out rule rejects an amount above current expected drawer cash. It does not infer physical cash or change refund behavior. No receipt, sale, refund, revenue, tax, stock, sync, authorization framework, live financial action or hardware activation is fabricated.
+
+Session totals and closing views distinguish sales, refunds, paid-ins and paid-outs. Record times use the configured store timezone. Transaction-ordered sale/refund watermarks let backup replay validate available cash without relying on timestamps; clock rollback remains supported. Cross-window cash journals share the existing register writer Web Lock, use exact compare-before-write/remove checks, and reject malformed recovery records. A stale window cannot resurrect an action whose journal another window completed or discarded.
+
+## Local verification
+
+- `cargo test --workspace --all-targets --all-features --locked`: **177 tests passed**, comprising the prior 154 plus 17 cash-movement contract/race tests and 6 movement export/replay tests.
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` and `cargo fmt --all -- --check`: passed.
+- Workspace doctests (no cases) and the pricing-demo example: passed.
+- Frontend typecheck, **131 pure tests** (103 prior plus 28 cash/recovery/guard regressions), and production build: passed.
+- Strict standalone TypeScript checking of the new browser specification and guarded-fixture helper: passed. Playwright discovery: **47 scenarios**, including the 37 prior scenarios and 10 cash-movement scenarios. Discovery is not browser execution.
+- Native host formatting and locked no-dependency Cargo metadata: passed. Two new dispatcher scenarios also passed in a portable extracted Rust harness against the real service, without Tauri system dependencies. The native suite now contains 14 Windows test cases; its final Windows execution and packaging remain CI-pending.
+- All pre-settings golden fixture files remain byte-identical. Valid v2/v3 closed-session snapshots without new total fields retain their exact raw JSON through restore.
+
+Tests cover zero/negative/overflow/excess-precision inputs, UTF-8 reason limits and controls, mandatory fields and unknown authority, currency/precision/session mismatches, wide integer aggregates, explicit overdraw rejection including negative-refund balances, one-time retries after restart/close/restore, exact-matching and conflicting concurrent keys, competing paid-outs, stale-close races, immutable constraints, sequence watermarks and malformed replay. Four independent-connection races also passed 20 repetitions each. Ordinary parked-cart tests remain in the full suite.
+
+A final parallel test run exposed a pre-existing timestamp-only temporary-path collision in the parked-cart test helper. The helper now adds a process-local atomic counter; no assertion, production behavior or historical fixture was weakened. The full final run passed after this isolation correction. An old pure ledger fixture was updated to include the session/currency guards already emitted by the prior UI; separate new tests explicitly reject missing or malformed recovery fields.
+
+## Independent review
+
+Read-only review found no blocking correctness issue in transaction/replay ordering, immutable closes, currency isolation, cash/revenue separation or cross-window recovery. It independently passed 39 focused Rust tests, all 131 frontend tests and typecheck. An additional harness completed **108 backup/ledger/sales-export roundtrips across 12 sessions in USD, JPY and KWD**, and verified that an omitted nonzero closed paid-out total fails validation before creating a restore destination. Independent Node checks covered lost-response reload, exact retries, stale-tab ownership, corrupt journals and amount/reason boundaries.
+
+## Browser, screenshots and native boundary
+
+Ten new real-Rust browser scenarios cover amount/reason review, Cancel without writes, conservation with a sale and refund, repeated clicks during a held real response, both paid-in/out lost-response reload recovery, closed-session rejection, another window invalidating a close, input/overdraw rejection, malformed-journal startup, and two-window recovery ownership. Network interception only delays or loses actual service responses; it does not fabricate financial results. History asserts Tokyo timestamps while the browser timezone is Honolulu.
+
+The scenarios capture eight original PNGs: desktop **1440×1000** and phone **390×844** pairs for `cash-paid-in-review`, `cash-paid-out-review`, `cash-movement-closing`, and `cash-movement-history`. Those screenshots are **not yet generated or visually verified in this local environment**. They must come from a passing GitHub browser job for the published implementation head, then be copied without image editing and inspected before inclusion in the README. All records use synthetic Cedar Market training data.
+
+Local Chromium/socket and GTK/GObject restrictions remain. No blocked browser launch, permission escalation or native build workaround was attempted. The extracted dispatcher harness is not Tauri/WebView2 runtime execution. Passing browser CI or unsigned packaging does not certify physical phone/tablet support, native dialogs, scanners, printers, scales, cash drawers, production payments, taxes or compliance. Final PR-head CI and artifact provenance must be recorded separately after publication; user approval is still required to merge.
+
+---
+
 # Milestone 9 validation
 
 Implemented from merged main `b80f472199dcc103a0fcaa4d58b45a45afe2c957` on 2026-10-19. Before editing, all **125 tracked local blobs**, including binary assets, matched the remote Git tree. App version is 0.9.0; SQLite schema 3 and portable backup v3 add durable active/parked identities and mutation recovery records while accepting older v1/v2 backups. Pricing/config schemas and immutable historical receipt bytes are unchanged.

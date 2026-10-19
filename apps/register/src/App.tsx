@@ -8,7 +8,7 @@ import { StoreSettingsEditor } from './StoreSettingsEditor';
 import { SalesReportPanel } from './SalesReport';
 import { exportSalesReport } from './reportExport';
 import { LedgerForm, LedgerPanel, type LedgerAction } from './CashLedger';
-import { readLedgerAttempt, sameCurrency, type CashLedger, type LedgerAttempt } from './ledger';
+import { LedgerWriter, sameCurrency, type CashLedger } from './ledger';
 import { ReceiptContent } from './Receipt';
 import { Icon } from './Icon';
 import { activeCatalog, newGroup } from './catalog';
@@ -61,8 +61,18 @@ export default function App() {
   const [ledger, setLedger] = useState<CashLedger | null>(null);
   const [ledgerError, setLedgerError] = useState('');
   const [ledgerAction, setLedgerAction] = useState<LedgerAction | null>(null);
-  const [ledgerAttempt, setLedgerAttempt] = useState<LedgerAttempt | null>(readLedgerAttempt);
-  const refreshLedger = async () => { try { setLedger(await command<CashLedger>('get_cash_ledger')); setLedgerError(''); } catch (e) { setLedger(null); setLedgerError(errorText(e)); } };
+  const ledgerWriterRef = useRef<LedgerWriter | null>(null);
+  if (!ledgerWriterRef.current) ledgerWriterRef.current = new LedgerWriter(command, localStorage, withRegisterWriter);
+  const ledgerWriter = ledgerWriterRef.current;
+  const ledgerView = useSyncExternalStore(ledgerWriter.subscribe, ledgerWriter.snapshot);
+  const ledgerAttempt = ledgerView.pending;
+  const ledgerOpening = useRef(false);
+  const ledgerRequest = useRef(0);
+  const refreshLedger = async () => {
+    const request = ++ledgerRequest.current;
+    try { const records = await command<CashLedger>('get_cash_ledger'); if (request === ledgerRequest.current) { setLedger(records); setLedgerError(''); } }
+    catch (error) { if (request === ledgerRequest.current) { setLedger(null); setLedgerError(errorText(error)); } }
+  };
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const reportReceiptRequest = useRef(0);
@@ -113,25 +123,25 @@ export default function App() {
     return () => { live = false; };
   }, [lines, state?.config_revision, booting]);
   useEffect(() => {
-    if (booting || !state?.configured || attempt || workspace.blocked || workflow || scannerPending > 0) return;
+    if (booting || !state?.configured || attempt || workspace.blocked || workflow || scannerPending > 0 || ledgerWriter.blocked || ledgerAction || ledgerOpening.current) return;
     const timer = setTimeout(() => { draftTimer.current = null; if (scannerPendingRef.current === 0) void workspace.flush().catch(() => {}); }, 300);
     draftTimer.current = timer;
     return () => { clearTimeout(timer); if (draftTimer.current === timer) draftTimer.current = null; };
-  }, [lines, booting, state?.configured, attempt, draftView.busy, workflow, scannerPending]);
-  const cartLocked = !!attempt || workspace.blocked || !!workflow || checkoutInFlight.current;
+  }, [lines, booting, state?.configured, attempt, draftView.busy, workflow, scannerPending, ledgerView.busy, ledgerAttempt, ledgerView.invalidJournal, ledgerAction]);
+  const cartLocked = !!attempt || workspace.blocked || !!workflow || checkoutInFlight.current || ledgerWriter.blocked || !!ledgerAction;
   const changeCart = (next: CartLine[]) => {
-    if (attempt || workspace.blocked || workflowRef.current || checkoutInFlight.current) return;
+    if (attempt || workspace.blocked || workflowRef.current || checkoutInFlight.current || ledgerWriter.blocked || ledgerAction) return;
     if (workspace.change(next)) setQuote(null);
   };
   const addProduct = (product: CatalogItem, value: string) => {
-    if (attempt || workspace.blocked || workflowRef.current || checkoutInFlight.current) return;
+    if (attempt || workspace.blocked || workflowRef.current || checkoutInFlight.current || ledgerWriter.blocked || ledgerAction) return;
     const line: CartLine = { id: crypto.randomUUID(), sku: product.sku, quantity: product.kind === 'measured' ? { kind: 'measured', grams: value } : { kind: product.kind, count: value } };
     changeCart([...workspace.view.lines, line]);
     setSelected(null);
   };
   const closeWorkflow = () => { if (workflowBusy || workspace.blocked) return; workflowRef.current = null; setWorkflow(null); setWorkflowError(''); };
   const openWorkflow = (next: 'park' | 'list') => {
-    if (attempt || workspace.blocked || checkoutInFlight.current || workflowRef.current) return;
+    if (attempt || workspace.blocked || checkoutInFlight.current || workflowRef.current || ledgerWriter.blocked || ledgerAction) return;
     scannerResetToken.current += 1;
     if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
     workflowRef.current = next; setWorkflow(next); setWorkflowError('');
@@ -153,7 +163,7 @@ export default function App() {
   };
   const finishSale = async (tender: string) => {
     if (checkoutInFlight.current || (!attempt && (workspace.blocked || workflowRef.current))) return;
-    if (!attempt && (!ledger?.active_session || ledgerAttempt)) throw new Error('Open a cash session and resolve pending cash actions first.');
+    if (!attempt && (!ledger?.active_session || ledgerWriter.blocked || ledgerAction)) throw new Error('Open a cash session and resolve pending cash actions first.');
     if (!quote && !attempt) throw new Error('Wait for a current quote before checkout.');
     checkoutInFlight.current = true;
     scannerResetToken.current += 1;
@@ -187,6 +197,15 @@ export default function App() {
       setAttempt(null); setCheckout(false); setQuote(null);
     });
   };
+  const openLedgerAction = async (action: LedgerAction) => {
+    if (attempt || workspace.blocked || ledgerWriter.blocked || checkoutInFlight.current || ledgerOpening.current) return;
+    ledgerOpening.current = true;
+    scannerResetToken.current += 1;
+    if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+    try { await workspace.flush(); ledgerWriter.clearUnsentError(); setLedgerAction(action); }
+    catch (error) { setNotice(errorText(error)); }
+    finally { ledgerOpening.current = false; }
+  };
   const catalog = activeCatalog(state?.catalog || []);
   const visible = catalog.filter(item => (filter === 'all' || item.kind === filter) && `${item.name} ${item.sku}`.toLowerCase().includes(query.toLowerCase()));
   const currency = state?.config?.currency;
@@ -199,7 +218,7 @@ export default function App() {
     </aside>
     <main className="main-content">
       <header className="topbar"><div className="breadcrumb">WORKSPACE <span>/</span> {page === 'register' ? 'REGISTER' : page === 'history' ? 'SALES HISTORY' : page === 'cash' ? 'CASH SESSIONS' : page === 'reports' ? 'REPORTS' : 'CONFIGURATION'}</div><div className="topbar-right"><span className="training-badge"><span/>TRAINING MODE</span><span className="today">{new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span></div></header>
-      {booting ? <div className="full-state"><div className="loading-wheel"/><h2>Opening your register</h2><p>Connecting to your local workspace…</p></div> : bootError ? <div className="full-state"><Icon name="info" size={40}/><h2>Let’s reconnect.</h2><p>{bootError}</p><button className="primary" onClick={() => void loadState()}><Icon name="refresh"/>Try again</button><small>Browser development needs the local Rust service on port 4174.</small></div> : !state?.configured ? <Welcome loading={demoLoading} error={notice} onInitialize={() => void initialize()} onBlank={currency => void initialize(currency)}/> : page === 'history' ? <History onReceipt={saved => { setLedger(null); setReceipt(saved); void refreshLedger(); }} ledger={ledger}/> : page === 'cash' ? <LedgerPanel ledger={ledger} error={ledgerError} onRefresh={() => void refreshLedger()} onAction={setLedgerAction} currency={currency!} blocked={!!attempt || !!ledgerAttempt}/> : page === 'reports' ? <SalesReportPanel defaultTimezone={state.config?.store_settings?.timezone ?? 'UTC'} configRevision={state.config_revision} onExport={exportSalesReport} onOpenReceipt={async (saleId, isCurrent) => { const request = ++reportReceiptRequest.current; const saved = await command<Receipt>('get_receipt', { sale_id: saleId }); if (request !== reportReceiptRequest.current || pageRef.current !== 'reports' || (isCurrent && !isCurrent())) return; await refreshLedger(); if (request === reportReceiptRequest.current && pageRef.current === 'reports' && (!isCurrent || isCurrent())) setReceipt(saved); }}/> : page === 'settings' ? <Settings onBusyChange={setSettingsBusy} onDirtyChange={setSettingsDirty} revision={state.config_revision} config={state.config!} hasCart={lines.length > 0 || !!attempt} onSave={next => { workspace.refresh(next); setNotice('Saved configuration loaded. New quotes use these rules.'); }}/> : <div className="register-layout">
+      {booting ? <div className="full-state"><div className="loading-wheel"/><h2>Opening your register</h2><p>Connecting to your local workspace…</p></div> : bootError ? <div className="full-state"><Icon name="info" size={40}/><h2>Let’s reconnect.</h2><p>{bootError}</p><button className="primary" onClick={() => void loadState()}><Icon name="refresh"/>Try again</button><small>Browser development needs the local Rust service on port 4174.</small></div> : !state?.configured ? <Welcome loading={demoLoading} error={notice} onInitialize={() => void initialize()} onBlank={currency => void initialize(currency)}/> : page === 'history' ? <History onReceipt={saved => { setLedger(null); setReceipt(saved); void refreshLedger(); }} ledger={ledger}/> : page === 'cash' ? <LedgerPanel ledger={ledger} error={ledgerError} onRefresh={() => void refreshLedger()} onAction={action => void openLedgerAction(action)} currency={currency!} blocked={!!attempt || ledgerWriter.blocked || workspace.blocked} timezone={state.config?.store_settings?.timezone ?? 'UTC'}/> : page === 'reports' ? <SalesReportPanel defaultTimezone={state.config?.store_settings?.timezone ?? 'UTC'} configRevision={state.config_revision} onExport={exportSalesReport} onOpenReceipt={async (saleId, isCurrent) => { const request = ++reportReceiptRequest.current; const saved = await command<Receipt>('get_receipt', { sale_id: saleId }); if (request !== reportReceiptRequest.current || pageRef.current !== 'reports' || (isCurrent && !isCurrent())) return; await refreshLedger(); if (request === reportReceiptRequest.current && pageRef.current === 'reports' && (!isCurrent || isCurrent())) setReceipt(saved); }}/> : page === 'settings' ? <Settings onBusyChange={setSettingsBusy} onDirtyChange={setSettingsDirty} revision={state.config_revision} config={state.config!} hasCart={lines.length > 0 || !!attempt} onSave={next => { workspace.refresh(next); setNotice('Saved configuration loaded. New quotes use these rules.'); }}/> : <div className="register-layout">
         <section className="catalog-area">
           <div className="page-heading"><div><span className="eyebrow">A LITTLE PRECISION. A LOT OF POSSIBILITY.</span><h1>Let’s ring it up<span className="emerald">.</span></h1><p>Measured by weight. Priced with confidence.</p></div><span className="catalog-count">{catalog.length} products</span></div>
           <div className="drawer-status"><span>{ledger?.active_session ? `Cash session open · ${money(ledger.active_session.expected_cash_minor, ledger.active_session.currency)} expected` : ledgerError ? 'Cash session unavailable' : 'Open a cash session before checkout'}</span><button className="secondary" onClick={() => setPage('cash')}>Manage cash</button></div><div className="search-field"><Icon name="search"/><input aria-label="Search products" placeholder="Search products or SKU…" value={query} onChange={event => setQuery(event.target.value)}/>{query && <button className="icon-button compact" aria-label="Clear search" onClick={() => setQuery('')}><Icon name="close" size={16}/></button>}<span className="search-hint">CATALOG</span></div>
@@ -216,18 +235,19 @@ export default function App() {
           <div className="cart-items">{!lines.length ? emptyCart() : lines.map(line => { const item = state.catalog.find(item => item.sku === line.sku); const priced = quote?.lines.find(item => item.id === line.id); return <div className="cart-line" key={line.id}><div className={`line-icon ${line.quantity.kind}`}><Icon name={line.quantity.kind === 'measured' ? 'jar' : 'box'} size={20}/></div><div className="line-details"><strong>{item?.name || line.sku}</strong><span>{quantityLabel(line.quantity, item?.declared_content_grams)}</span><small>{!item ? 'Product unavailable · saved quantity retained' : item.kind !== line.quantity.kind ? 'Product type changed · saved quantity retained' : item.pricing.kind === 'weight_group' ? 'Shared weight pricing' : item.kind === 'unit' ? 'Fixed unit price' : 'Fixed package price'}</small></div><div className="line-end"><strong>{priced ? money(priced.amount_minor, currency) : '—'}</strong><button className="remove-line" disabled={cartLocked} aria-label={`Remove ${item?.name || line.sku}`} onClick={() => changeCart(lines.filter(item => item.id !== line.id))}>Remove</button></div></div>; })}
             {quote && quote.groups.length > 0 && <div className="group-breakdown"><div className="breakdown-title"><Icon name="scale" size={16}/><span>YOUR WEIGHT PRICING</span></div>{quote.groups.map(group => <details key={group.group_id}><summary><div><strong>{group.schedule.name || group.group_id}</strong><span>{group.eligible_grams} g eligible · {group.selected_nominal_grams} g tier</span></div><span>{money(group.amount_minor, quote.currency)}<Icon name="chevron" size={14}/></span></summary><dl><div><dt>Actual measured</dt><dd>{group.actual_measured_grams} g</dd></div><div><dt>Declared pack content</dt><dd>{group.declared_package_grams} g</dd></div><div><dt>Tier tolerance</dt><dd>+{group.tolerance_grams} g</dd></div><div><dt>Billable weight</dt><dd>{group.billable_grams} g</dd></div></dl><p>{ruleNames[group.rule] || group.rule}</p></details>)}</div>}
           </div>
-          <div className="cart-summary">{quoteError && <div className="error-banner" role="alert">{quoteError}</div>}{draftView.busy && <p className="draft-saving" role="status">Saving cart safely…</p>}{draftView.error && <div className="error-banner" role="alert">{draftView.error}</div>}{attempt && <div className="warning-banner">A checkout needs to be resolved. Retry it safely before editing this cart.</div>}<div className="summary-row"><span>Subtotal</span><strong>{quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><div className="summary-row muted"><span>Tax</span><span className="tax-label">Not configured · demo</span></div><div className="total-row"><span>Total</span><strong aria-live="polite">{pricing ? <span className="calculating">Pricing…</span> : quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><button className="checkout-button" disabled={workspace.blocked || !!workflow || !!ledgerAttempt || (!attempt && (!quote || pricing || !!quoteError || !ledger?.active_session || !sameCurrency(ledger.active_session.currency, currency!)))} onClick={() => { scannerResetToken.current += 1; setCheckout(true); }}><Icon name="cash"/><span>{attempt ? 'Resume checkout' : 'Charge cash'}</span>{quote && <strong>{money(quote.total_minor, currency)}</strong>}<Icon name="arrow" size={18}/></button><div className="checkout-footnote"><Icon name="shield" size={13}/><span>Exact pricing. Saved locally.</span></div></div>
+          <div className="cart-summary">{quoteError && <div className="error-banner" role="alert">{quoteError}</div>}{draftView.busy && <p className="draft-saving" role="status">Saving cart safely…</p>}{draftView.error && <div className="error-banner" role="alert">{draftView.error}</div>}{attempt && <div className="warning-banner">A checkout needs to be resolved. Retry it safely before editing this cart.</div>}<div className="summary-row"><span>Subtotal</span><strong>{quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><div className="summary-row muted"><span>Tax</span><span className="tax-label">Not configured · demo</span></div><div className="total-row"><span>Total</span><strong aria-live="polite">{pricing ? <span className="calculating">Pricing…</span> : quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><button className="checkout-button" disabled={workspace.blocked || !!workflow || ledgerWriter.blocked || !!ledgerAction || (!attempt && (!quote || pricing || !!quoteError || !ledger?.active_session || !sameCurrency(ledger.active_session.currency, currency!)))} onClick={() => { scannerResetToken.current += 1; setCheckout(true); }}><Icon name="cash"/><span>{attempt ? 'Resume checkout' : 'Charge cash'}</span>{quote && <strong>{money(quote.total_minor, currency)}</strong>}<Icon name="arrow" size={18}/></button><div className="checkout-footnote"><Icon name="shield" size={13}/><span>Exact pricing. Saved locally.</span></div></div>
         </aside>
       </div>}
       {notice && state?.configured && <div className="toast" role="status">{notice}<button className="icon-button compact" aria-label="Dismiss notification" onClick={() => setNotice('')}><Icon name="close" size={16}/></button></div>}
     </main>
-    {(ledgerAction || ledgerAttempt) && <Modal title={ledgerAttempt ? 'Recover cash action' : ledgerAction?.kind === 'refund' ? 'Full receipt refund' : ledgerAction?.kind === 'close' ? 'Close cash session' : 'Open cash session'}><LedgerForm action={ledgerAction} pending={ledgerAttempt} onPending={setLedgerAttempt} onCancel={() => { setLedgerAction(null); void refreshLedger(); }} onDone={message => { setLedgerAction(null); setNotice(message); setPage('cash'); void refreshLedger(); }}/></Modal>}
+    {ledgerView.invalidJournal && !attempt && <Modal title="Cash recovery required"><p className="error-banner" role="alert">{ledgerView.error}</p><p>No new cash action can be sent until the original recovery record is restored. Keep browser data intact.</p></Modal>}
+    {(ledgerAction || ledgerAttempt) && !ledgerView.invalidJournal && !attempt && <Modal title={ledgerAttempt ? 'Recover cash action' : ledgerAction?.kind === 'paid_in' ? 'Record paid in' : ledgerAction?.kind === 'paid_out' ? 'Record paid out' : ledgerAction?.kind === 'refund' ? 'Full receipt refund' : ledgerAction?.kind === 'close' ? 'Close cash session' : 'Open cash session'}><LedgerForm action={ledgerAction} writer={ledgerWriter} view={ledgerView} onCancel={() => { setLedgerAction(null); void refreshLedger(); }} onDone={message => { setLedgerAction(null); setNotice(message); setPage('cash'); void refreshLedger(); }}/></Modal>}
     {workflow === 'park' && !draftView.error && <Modal title="Park this cart" subtitle="Keep this sale for later and make room for the next one." onClose={!workflowBusy && !draftView.busy ? closeWorkflow : undefined}><ParkCartForm busy={workflowBusy || draftView.busy} error={workflowError} onSubmit={parkCart}/></Modal>}
     {workflow === 'list' && !draftView.error && <Modal title="Parked carts" subtitle="Saved on this device. Nothing is charged or reserved." onClose={!workflowBusy && !draftView.busy ? closeWorkflow : undefined} wide><ParkedCarts workspace={workspace} activeLines={lines} onBusy={setWorkflowBusy} onDone={message => { workflowRef.current = null; setWorkflow(null); setQuote(null); setNotice(message); }}/></Modal>}
-    {draftView.error && !attempt && <Modal title="Recover saved cart action" subtitle="Your cart is locked so an uncertain action cannot lose or duplicate its lines." wide><DraftRecovery workspace={workspace} view={draftView} onDone={() => { workflowRef.current = null; setWorkflow(null); setWorkflowError(''); setQuote(null); }}/></Modal>}
+    {draftView.error && !attempt && !ledgerWriter.blocked && <Modal title="Recover saved cart action" subtitle="Your cart is locked so an uncertain action cannot lose or duplicate its lines." wide><DraftRecovery workspace={workspace} view={draftView} onDone={() => { workflowRef.current = null; setWorkflow(null); setWorkflowError(''); setQuote(null); }}/></Modal>}
     {selected && !draftView.error && <ProductModal blocked={cartLocked} product={selected} config={state!.config!} onClose={() => setSelected(null)} onAdd={value => addProduct(selected, value)}/>}
     {checkout && (!draftView.error || attempt) && (quote || attempt) && <CashCheckout total={attempt?.expected_total_minor || quote!.total_minor} currency={attempt?.expected_currency || currency!} attempt={attempt} onClose={() => setCheckout(false)} onSubmit={finishSale} onRevise={reviseAttempt}/>}
-    {receipt && !draftView.error && <ReceiptModal key={receipt.sale_id} receipt={receipt} ledger={ledger} blocked={!!attempt || !!ledgerAttempt} onRefund={() => { if (ledger?.active_session) { setLedgerAction({ kind: 'refund', receipt, session: ledger.active_session }); setReceipt(null); } }} onClose={() => setReceipt(null)}/>}
+    {receipt && !draftView.error && <ReceiptModal key={receipt.sale_id} receipt={receipt} ledger={ledger} blocked={!!attempt || ledgerWriter.blocked} onRefund={() => { if (ledger?.active_session) { void openLedgerAction({ kind: 'refund', receipt, session: ledger.active_session }); setReceipt(null); } }} onClose={() => setReceipt(null)}/>}
   </div>;
 }
 

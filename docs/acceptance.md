@@ -249,3 +249,15 @@ or external publication is part of these acceptance results.
 - Backup v3 is a consistent snapshot including active/parked lifecycle identities and operation records. Malformed identities, revisions and cross-links fail restore without replacing an existing database. Failure in a write transaction leaves the previous complete state intact.
 - Parked carts make no sale, revenue, cash movement or inventory reservation and create no customer record. Sales exports exclude them; full backups include them. No expiry or automatic deletion is introduced.
 - Browser screenshots must come from real CI execution and pass visual review before README publication. See VALIDATION.md for actual test execution and limitations.
+
+
+## Milestone 10: explicit cash paid-in/out
+
+- Positive exact cash-movement amounts and required 1–500 UTF-8 byte reasons use an explicit Review/Confirm workflow; Cancel does not submit, and repeat clicks do not create duplicates.
+- A dedicated movement identity and idempotency key survive lost responses, process restart and restore. Same-key altered content conflicts; same-key exact replay returns the original record even after closing.
+- New movements require an open matching session, currency and precision. They cannot create sales, refunds, receipts, tax or inventory events. Revenue remains sales less refunds.
+- Expected cash equals opening float plus sales minus refunds plus paid-ins minus paid-outs. Every committed event increments closing movement count, even if two adjustments net to zero.
+- The prototype rejects a paid-out above expected available drawer cash. It does not infer physical cash or change legitimate-refund behavior. No negative-override or automatic reconciliation feature is introduced.
+- Closed totals and records stay immutable. Source-event watermarks preserve replay order without trusting timestamps, including clock rollback.
+- Schema/backup v4 preserves prior receipt bytes, draft lifecycle and legacy v1/v2/v3 restore. Malformed movement keys, relationships, source watermarks, currency precision, totals, sequences and closed summaries fail before any restore destination is created.
+- Real-Rust browser scenarios include loss/reload recovery, concurrent-window changes, cancellation, repeated submission and desktop/phone screenshot capture. Native dispatcher tests remain separate from physical native/hardware certification.

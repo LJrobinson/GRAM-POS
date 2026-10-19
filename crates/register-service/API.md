@@ -1,4 +1,4 @@
-# GRAM register service: milestone 8
+# GRAM register service: milestone 10
 
 `gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
 
@@ -83,7 +83,7 @@ A true unit product has `kind:"unit"`, `declared_content_grams:null` (or omitted
 
 Every catalog kind may optionally have one `barcode` string. Missing/null means no barcode; serialization omits absent values, so legacy configurations, receipts, and backups retain their shape. Barcodes are exact case-sensitive identifiers, never numbers: leading zeros are significant. Valid barcodes have 1–128 UTF-8 bytes, no surrounding whitespace, and no Unicode control characters. No trimming, numeric coercion, case folding, prefix matching, or check-digit normalization occurs. Duplicates are rejected across both active and archived products. Lookup never falls back to SKU or name, never mutates a draft, and rejects archived products rather than silently selling them. The lookup response includes the revision of the same configuration read, allowing clients to reject stale scan results. Invalid barcode payloads return `INVALID_INPUT`; an unconfigured register returns `NOT_CONFIGURED`.
 
-These are additive DTO changes, not a database migration. SQLite stays schema version 2 and configuration stays schema version 1. Saved unit drafts, receipt snapshots, and logical backups preserve unit counts and optional barcodes; historical receipts are not repriced after catalog edits.
+Unit/barcode support introduced additive DTO changes without its own database migration. Configuration remains schema version 1; the current SQLite/backup version is 4. Saved unit drafts, receipt snapshots, and logical backups preserve unit counts and optional barcodes; historical receipts are not repriced after catalog edits.
 
 ## Settings
 
@@ -132,7 +132,7 @@ Host headers must be `127.0.0.1:<backend port>` or `localhost:<backend port>`. O
 
 ## Local storage guarantees and limits
 
-SQLite bundled with `rusqlite` provides transactional local storage with foreign keys, full synchronization, an application ID, and schema version 2 with an explicit migration from version 1. Unsupported future schemas and nonempty foreign files are rejected. Sale and receipt update/delete triggers protect immutable records through normal SQL operations; this is not tamper-resistant accounting against a user with arbitrary file access. Keep the database on a local filesystem, not a network share. Exports are unencrypted logical snapshots, not a synchronization protocol or tamper-resistant accounting archive. See [backup and recovery](../../docs/backup.md) for the versioned format, recovery tool, and restrictions. Older app versions must not reopen upgraded files.
+SQLite bundled with `rusqlite` provides transactional local storage with foreign keys, full synchronization, an application ID, and schema version 4 with explicit transactional migrations from versions 1, 2, and 3. Unsupported future schemas and nonempty foreign files are rejected. Sale and receipt update/delete triggers protect immutable records through normal SQL operations; this is not tamper-resistant accounting against a user with arbitrary file access. Keep the database on a local filesystem, not a network share. Exports are unencrypted logical snapshots, not a synchronization protocol or tamper-resistant accounting archive. See [backup and recovery](../../docs/backup.md) for the versioned format, recovery tool, and restrictions. Older app versions must not reopen upgraded files.
 
 Tests include fresh-file explicit setup, close/reopen, replay after policy edits, conflicting replay, concurrent connections, underpayment/malformed tender no writes, stale quote rejection, injected receipt-write rollback, immutable rows, invalid settings preserving prior settings, future-schema rejection, policy/core agreement, pooled declared-vs-measured weight, and integers beyond JavaScript's safe-number range.
 
@@ -142,17 +142,17 @@ cargo clippy -p gram-register-service --all-features --all-targets -- -D warning
 ```
 
 
-## Cash ledger commands (v0.4)
+## Cash ledger commands (v0.10)
 
 All new cash activity requires an open session. Receipts remain unchanged; sale/session association is a separate immutable relation. Old schema-1 sales have no session and never contribute to a newly opened drawer.
 
-- `get_cash_ledger {}` returns `{active_session, sessions, refunds, sale_sessions}`. Active session is null when closed. `sale_sessions` contains `{sale_id,session_id}` mappings.
+- `get_cash_ledger {}` returns `{active_session, sessions, refunds, sale_sessions, cash_movements}`. Active session is null when closed. `sale_sessions` contains `{sale_id,session_id}` mappings.
 - `open_cash_session {idempotency_key, opening_float_minor, expected_currency}` returns the created session. Persist this key and exact payload before sending; replay returns that same session, even after it closes.
-- `close_cash_session {session_id, counted_minor, expected_movement_count}` returns a permanent closed summary. The movement count from the reviewed ledger guards against a racing sale/refund. A completed close can be replayed with the same count; it cannot be edited.
+- `close_cash_session {session_id, counted_minor, expected_movement_count}` returns a permanent closed summary. The movement count from the reviewed ledger guards against a racing sale, refund, paid-in, or paid-out movement. A completed close can be replayed with the same count; it cannot be edited.
 - `refund_cash_sale {idempotency_key, sale_id, reason, expected_session_id, expected_currency}` records the original full receipt total in the matching current session, with no catalog repricing or stock movement. A second refund for the same sale is rejected.
 - `get_refund_by_key {idempotency_key}` returns `{refund: RefundReceipt|null}` for uncertain-response recovery.
 
-`CashSession` contains `session_id`, `opened_at_unix`, `currency`, `opening_float_minor`, `sales_total_minor`, `refunds_total_minor`, `expected_cash_minor`, `movement_count`, nullable `closed_at_unix`, nullable `counted_minor`, and nullable `variance_minor`. IDs, counts, timestamps and money are exact strings. Expected cash and variance may be signed. Expected cash = opening float + sales − refunds; variance = counted − expected.
+`CashSession` contains `session_id`, `opened_at_unix`, `currency`, `opening_float_minor`, `sales_total_minor`, `refunds_total_minor`, `paid_in_total_minor`, `paid_out_total_minor`, `expected_cash_minor`, `movement_count`, nullable `closed_at_unix`, nullable `counted_minor`, and nullable `variance_minor`. IDs, counts, timestamps and money are exact strings. Expected cash and variance may be signed. Expected cash = opening float + sales − refunds + paid in − paid out; variance = counted − expected.
 
 `RefundReceipt` contains `refund_id`, `refund_number`, `created_at_unix`, `sale_id`, `original_receipt_number`, `session_id`, `reason`, `amount_minor`, `currency`, and `payment_method: "cash"`. Refund amounts are nonnegative original totals, deducted once in cash reconciliation. Original sale receipts are never removed or rewritten.
 
@@ -203,7 +203,7 @@ New frontend cash-sale/refund requests bind `expected_session_id` and `expected_
 
 The example event is illustrative; a full report includes every event contributing to its groups. Groups are sorted by currency code and precision. Events are sorted by numeric Unix time, then sale before refund for equal times, then numeric event ID. `event_id` is scoped by `kind`: sale ID for a sale, refund ID for a refund. `reason` is null for sales; `session_id` is null for legacy sales. IDs, timestamps, amounts and both counts are exact decimal strings. A refund event's `total_minor` is its nonnegative saved payout. Group net is gross sales minus refunds and may be negative in a refund-only period.
 
-Reports use one consistent, validated saved-ledger snapshot. A sale is selected by its saved sale time; a refund is independently selected by its own saved refund time, even when its original sale falls outside the date range. Legacy sales are included once without inventing sessions. Changed or archived catalog items do not reprice original events. Each currency **and minor-unit precision** is a separate group: there is no mixed-currency grand total or conversion. Opening float, cash counts, cash-session totals, tender and change are never revenue. An empty result has `groups:[]` and `events:[]`, including an unconfigured register. A malformed/incomplete ledger fails closed rather than silently omitting history.
+Reports use one consistent, validated saved-ledger snapshot. A sale is selected by its saved sale time; a refund is independently selected by its own saved refund time, even when its original sale falls outside the date range. Legacy sales are included once without inventing sessions. Changed or archived catalog items do not reprice original events. Each currency **and minor-unit precision** is a separate group: there is no mixed-currency grand total or conversion. Opening float, paid-in and paid-out movements, cash counts, cash-session totals, tender and change are never revenue. Paid-in/out records do not appear in sales-report events, counts, or CSV summaries. An empty result has `groups:[]` and `events:[]`, including an unconfigured register. A malformed/incomplete ledger fails closed rather than silently omitting history.
 
 CSV is UTF-8, with one rectangular 23-column schema: `record_type,start_date,end_date,timezone,start_at_unix,end_at_unix,config_revision,created_at_local,utc_offset_seconds,currency_code,minor_unit_exponent,gross_sales_minor,refunds_minor,net_sales_minor,sale_count,refund_count,event_kind,event_id,sale_id,created_at_unix,total_minor,session_id,reason`. `summary` rows hold each currency/precision aggregate; `event` rows hold the matching immutable sale/refund details. Columns not applicable to a row are empty. Do not add summary rows and event rows together. An empty explicit-timezone/revision report produces a `metadata` row carrying date/zone/bounds/revision only; old date-only empty requests still produce only the header. All cells are RFC 4180 quoted, embedded quotes are doubled, and records end with CRLF. Unicode is preserved. Spreadsheet formula-leading refund text (`=`, `+`, `-`, `@`, including after whitespace) and leading tab/newline controls are prefixed with an apostrophe. Numeric cells contain only validated exact decimal representations, never formula expressions.
 
@@ -267,3 +267,38 @@ Preview preserves original line IDs, SKUs and quantity tags/text. It resolves cu
 Client mutation recovery keys and pending checkout keys serve different purposes. Persist a pending request before dispatch, block conflicting edits while its outcome is uncertain, and retry exactly the same request. Serialize/flush autosaves before park or checkout; invalidate scanner callbacks immediately when changing cart context. A rejected stale mutation must not be retried with a guessed latest revision and the old cart content.
 
 SQLite schema 3 and logical backup v3 include all durable cart lifecycle/operation data in the same consistent snapshot as original receipt and ledger bytes. Restore supports older v1/v2 backups and validates new metadata and relationships before creating a database. Carts are never counted in sales history/reports or revenue until normal checkout. See [parked carts](../../docs/parked-carts.md) and [backup recovery](../../docs/backup.md).
+
+
+## Cash paid-in and paid-out movements (v0.10)
+
+These are explicit **non-sale drawer adjustments**, separate from sales and refunds. They create no sale receipt, refund, revenue/tax event, stock movement, or cart mutation. A recorded movement is immutable; this release has no edit/delete/reversal command. Record a deliberate opposite movement only as a separately reviewed operator action, never as an automatic retry or repair.
+
+| Command | Required payload | Result |
+| --- | --- | --- |
+| `record_cash_movement` | `idempotency_key`, `kind`, `amount_minor`, `reason`, `expected_session_id`, `expected_currency` | Immutable `CashMovement` |
+| `get_cash_movement_by_key` | `idempotency_key` | `{cash_movement: CashMovement|null}` |
+
+```json
+{
+  "idempotency_key": "movement-generated-and-persisted-before-send",
+  "kind": "paid_out",
+  "amount_minor": "1250",
+  "reason": "Cash removed for supplies",
+  "expected_session_id": "1",
+  "expected_currency": {"code":"USD","minor_unit_exponent":2}
+}
+```
+
+`kind` is exactly `paid_in` or `paid_out`. Amount is a positive exact decimal minor-unit string from 1 through 18446744073709551615 (u64 maximum), not a signed amount or formatted currency. Decimal fractions, exponent notation, whitespace, zero, negatives, numeric JSON values, and overflow are rejected with `INVALID_INPUT`. The saved amount is canonicalized to unsigned decimal digits. Reason must be nonblank and at most **500 UTF-8 bytes**, without Unicode control characters. It is stored as supplied, never treated as markup. All fields are mandatory and unknown fields fail closed. Expected session ID is a canonical positive SQLite ID string. Currency guard compares both exact code and minor-unit exponent; the service never converts currencies or precision.
+
+`CashMovement` contains `{movement_id,created_at_unix,session_id,kind,amount_minor,reason,currency}`. IDs, timestamps, and amounts are strings. Movement ID is an independent AUTOINCREMENT sequence, not a sale ID, refund ID, or receipt number. `get_cash_ledger` returns `cash_movements` newest-ID first across sessions. Sessions expose separate `paid_in_total_minor` and `paid_out_total_minor`; absent historical fields decode as zero without rewriting their stored raw JSON. `movement_count` counts each sale, refund, paid-in, and paid-out exactly once. Checked wider signed integer aggregates preserve sums above u64 and JavaScript-safe ranges.
+
+New movements require the currently open session. `NO_OPEN_SESSION`, `SESSION_CHANGED`, and `SESSION_CURRENCY` reject absent, replaced, and wrong-currency/precision sessions. A paid-out amount greater than the current expected cash is rejected with `INSUFFICIENT_CASH`. This is an explicit conservative drawer policy, **not verification of physical cash availability**. Paid-in can increase a negative expected balance; paid-out cannot further reduce a negative balance. Existing full-refund semantics remain unchanged and can make expected cash negative. Closing still requires an operator count and records any variance.
+
+Persist the exact complete request and key before dispatch. An immediate SQLite transaction checks an existing key **before** current-session checks, then validates and records a new movement atomically. Identical retries return the original movement after close, restart, settings changes, or recovery. Changed-payload key reuse returns `IDEMPOTENCY_CONFLICT`, including changed kind, amount, reason, session, or precision. A timeout or storage error is not proof of failure: reconcile with `get_cash_movement_by_key` or retry the same request/key. A missing lookup can be followed by that same request, never by a fresh key merely because its response was lost. Concurrent retries cannot create two adjustments; concurrent payouts serialize against the committed balance. A racing close either closes before the movement (which then fails) or sees an increased count and returns `STALE_SESSION`.
+
+SQLite schema 4 adds `cash_movements` with independent identity/key uniqueness, session foreign key, immutable update/delete triggers, original `request_json`, immutable `movement_json`, and internal `sales_watermark` / `refunds_watermark` IDs. Each watermark is the greatest committed sale/refund ID at insertion (zero if none), captured in the same write transaction. These prefixes establish cross-stream ordering without modifying earlier receipts, refund rows, or closed summaries, and without assuming that wall-clock timestamps increase.
+
+Logical backup **v4/schema 4** adds `cash_movements` records and `cash_movements_sequence` to the v3 envelope. Every record retains raw request/movement JSON and both watermark strings. Recovery validates identity/key/sequence bounds, required guards, positive exact amounts/reasons, matching session currency/precision, source references and monotonic session/prefix order, each historical paid-out's available balance, and closed-session totals/count/variance. Referenced refunds cannot precede their source sale in a movement prefix. Timestamps must be canonical nonnegative strings but may be equal or run backward. Closed histories cannot acquire extra movements unnoticed. Corrupt/inconsistent data fails before creating the destination; exports and reports use the same validator. Import continues to accept valid v1/v2/v3 backups, preserving all legacy raw receipt/session/request JSON bytes and allocating new movement IDs independently.
+
+The readable sales-ledger JSON export is **v3** and adds a separate `cash_movements` array (oldest-ID first) alongside unchanged receipt/refund/mapping records and recalculated session summaries. It is not the sales report: paid-in/out remain excluded from revenue and reporting CSV. The recoverable logical backup is v4, not this readable export. Neither is tamper-resistant against arbitrary file editing, and neither transmits data or moves real money.
