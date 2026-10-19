@@ -1,0 +1,3 @@
+# Golden compatibility snapshots are byte fixtures, not platform text files.
+# Never convert their line endings during Windows checkout or staging.
+crates/register-service/tests/fixtures/pre-settings-*.json -text
