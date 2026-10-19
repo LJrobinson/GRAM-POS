@@ -24,6 +24,15 @@ Frontend coverage checks count/receipt labels and serialized scanner work, delib
 
 No milestone-6 browser runtime, new screenshots, native Windows runtime or physical scanner pass is claimed locally. Chromium socket execution and native GTK/GObject dependencies remain blocked in this environment; denied escalation was not repeated. Existing README screenshots retain their original milestone-4/5 labels. Playwright discovery only proves test discovery, not execution. CI must run the real Rust/browser suite and native Windows checks/unsigned package for the published commit before merge. Actual keyboard scanner configuration/timing and native peripheral use remain unverified even if browser CI passes.
 
+
+## Published PR-head browser evidence
+
+[Real Rust register browser job 117842092332](https://github.com/LJrobinson/GRAM-POS/actions/runs/39183752395/job/117842092332) passed all **9 scenarios** for PR head `2cdb0b2b29476e41bd49fdb1bfd296182507e7a4` (PR merge checkout `eba2d165dfc1787889c3fc9b6590001a07354c94`). Original screenshot artifact `12157306579` has SHA-256 `97c7004e2717b870c60ceb2e782b02119fbb6f88c9e3e6ff05922437eb75e4bd`; the downloaded ZIP matched this digest.
+
+Desktop and phone scanner captures were visually inspected and show two distinct one-unit lines at $4.25, total $8.50, with no invented mass. README includes these unmodified captures. The run also verified a three-unit immutable $12.75 receipt and full refund after catalog edits. Screenshot review caught a blank mobile receipt in the full-page capture; that image is not published as proof, and receipt capture is being tightened to the visible modal viewport. Extremely large drawer amounts in screenshots are deliberate shared exact-arithmetic fixtures, not real business activity.
+
+At this implementation head, core CI including Rust 1.70/Wasm and platform checks passed; frontend and Linux/Windows service checks passed. Native Windows checks/unsigned packaging remained in progress while this evidence update was prepared. The final documentation head must pass its own CI. Browser text-entry tests do not certify a physical scanner or native-device peripheral behavior.
+
 ---
 
 # Milestone 5 validation

@@ -89,6 +89,26 @@ The print layout contains only the selected original receipt, not register contr
 
 </details>
 
+### Unit products and focused barcode scanning (milestone 6)
+
+These original captures come from the [passing milestone-6 real-browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39183752395/job/117842092332) for PR head `2cdb0b2`. All nine scenarios passed using the real Rust service and SQLite, including delayed-scan cancellation and repeated scans. Training fixtures include intentionally extreme currency values from the exact-arithmetic tests; they are not real business records or hardware certification.
+
+<details>
+<summary>View two deliberate unit scans and their exact total</summary>
+
+The focused barcode field added two separate one-unit lines at $4.25 each, totaling $8.50, without declared grams.
+
+![GRAM focused barcode field with two unit-count cart lines and exact 8.50 total](docs/screenshots/unit-scanner-desktop.png)
+
+</details>
+
+<details>
+<summary>View the phone scanner and count-based cart</summary>
+
+![GRAM phone layout with a dedicated barcode field and whole-item cart quantities](docs/screenshots/unit-scanner-phone.png)
+
+</details>
+
 ## Milestone 6: ordinary units and keyboard barcodes
 
 Version **0.6.0** adds ordinary **Unit / each** products alongside measured goods and prepackages:
@@ -98,7 +118,7 @@ Version **0.6.0** adds ordinary **Unit / each** products alongside measured good
 - Focus the dedicated barcode field, scan with a keyboard-style HID scanner, or type the code and press Enter. Count products add one item; measured products open the weight-entry prompt. Unknown and archived codes report an error.
 - Preserve the original quantity and price in saved receipts, refunds, reports and portable backups. Old measured/prepack records and older supported backups remain readable.
 
-This is keyboard text entry, not a scanner driver: no camera, device permission, global key listener, inventory, stock adjustment or synchronization is added. See [unit products and barcodes](docs/units-and-barcodes.md) for validation, retry and compatibility details. Existing screenshots above retain their milestone labels; milestone-6 browser/native runtime evidence is tracked in [VALIDATION.md](VALIDATION.md).
+This is keyboard text entry, not a scanner driver: no camera, device permission, global key listener, inventory, stock adjustment or synchronization is added. See [unit products and barcodes](docs/units-and-barcodes.md) for validation, retry and compatibility details. Screenshots above retain their milestone labels; milestone-6 browser/native runtime evidence is tracked in [VALIDATION.md](VALIDATION.md).
 
 ## Milestone 5: printable receipts and date-filtered reports
 

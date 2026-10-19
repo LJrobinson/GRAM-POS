@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page, type TestInfo, type Locator } from '@playwright/test';
 
 // All pricing, persistence, lookups and refunds go to the real Rust service.
 // Routes below only delay or lose a real response to exercise UI race recovery.
@@ -13,13 +13,43 @@ const unit = (sku: string, barcode: string, archived = false) => ({
   sku, barcode, name: `Scanner ${sku}`, kind: 'unit', declared_content_grams: null,
   archived, pricing: { kind: 'fixed_unit', unit_price_minor: '425' },
 });
-async function capture(page: Page, info: TestInfo, name: string) {
+async function capture(page: Page, info: TestInfo, name: string, options: { receipt?: boolean; editor?: Locator } = {}) {
   for (const [width, height, size] of [[1440, 1000, 'desktop'], [390, 844, 'phone']] as const) {
     await page.setViewportSize({ width, height });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    if (options.receipt) {
+      const receipt = page.locator('#print-receipt');
+      await expect(receipt).toBeVisible();
+      await expect(receipt.locator('.receipt-lines')).toContainText('3 units');
+      // The modal scrolls independently of the tall catalog behind it. Keep
+      // the actual sale lines and total in view, then capture the viewport:
+      // full-page resizing can move fixed overlays outside the screenshot.
+      await receipt.locator('.receipt-total').scrollIntoViewIfNeeded();
+      await expect(receipt.locator('.receipt-lines')).toBeInViewport({ ratio: 1 });
+      await expect(receipt.locator('.receipt-total')).toBeInViewport({ ratio: 1 });
+      const visible = await receipt.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const modal = element.closest('.modal')!.getBoundingClientRect();
+        return {
+          width: Math.max(0, Math.min(rect.right, modal.right, innerWidth) - Math.max(rect.left, modal.left, 0)),
+          height: Math.max(0, Math.min(rect.bottom, modal.bottom, innerHeight) - Math.max(rect.top, modal.top, 0)),
+          overflow: element.scrollWidth > element.clientWidth + 1,
+        };
+      });
+      expect(visible.width).toBeGreaterThan(200);
+      expect(visible.height).toBeGreaterThan(200);
+      expect(visible.overflow).toBe(false);
+    }
     const path = info.outputPath(`${name}-${size}.png`);
-    await page.screenshot({ path, fullPage: true });
-    await info.attach(`${name} ${size}`, { path, contentType: 'image/png' });
+    await page.screenshot({ path, fullPage: !options.receipt });
+    await info.attach(`${name} ${size} (training fixtures)`, { path, contentType: 'image/png' });
+    if (options.editor) {
+      await options.editor.scrollIntoViewIfNeeded();
+      await expect(options.editor).toBeVisible();
+      const editorPath = info.outputPath(`unit-product-editor-${size}.png`);
+      await options.editor.screenshot({ path: editorPath });
+      await info.attach(`Unit product editor ${size} (training fixture)`, { path: editorPath, contentType: 'image/png' });
+    }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
 }
@@ -87,7 +117,7 @@ test('ordinary unit catalog and exact barcode identity reject duplicates atomica
     sku: 'SCAN-UI-UNIT', name: 'Ordinary notebook', kind: 'unit', declared_content_grams: null,
     pricing: { kind: 'fixed_unit', unit_price_minor: '250' },
   });
-  await capture(page, info, 'unit-catalog');
+  await capture(page, info, 'unit-catalog', { editor: page.locator('.product-editor').filter({ has: page.getByLabel(`SKU ${index}`, { exact: true }) }) });
 });
 
 async function delayNextLookup(page: Page) {
@@ -167,7 +197,13 @@ test('focused keyboard scanner preserves two scans, reports errors and prompts m
   expect(new Set(lines.map((line: { id: string }) => line.id)).size).toBe(2);
   for (const line of lines) expect(line).toMatchObject({ sku: 'SCAN-UNIT', quantity: { kind: 'unit', count: '1' } });
   await expect(page.locator('.total-row')).toContainText('8.50');
+  await page.getByRole('button', { name: 'Units / each', exact: true }).click();
   await capture(page, info, 'unit-scanner');
+  await info.attach('Screenshot training fixture context', {
+    body: 'These screenshots show a test-only training register. The large drawer balance comes from an earlier exact-integer stress-price fixture, not actual business cash. The Units / each filter focuses this scanner screenshot on ordinary unit products.',
+    contentType: 'text/plain',
+  });
+  await page.getByRole('button', { name: /^All products/ }).click();
 
   await barcode.fill('000MEASURED');
   await barcode.press('Enter');
@@ -262,7 +298,7 @@ test('ordinary count checkout has no mass and receipt snapshot survives catalog 
   expect(saleId).toBeTruthy();
   const original = await api(request, 'get_receipt', { sale_id: saleId });
   const originalHtml = await receipt.innerHTML();
-  await capture(page, info, 'unit-receipt');
+  await capture(page, info, 'unit-receipt', { receipt: true });
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   const changed = await api(request, 'get_state');
   const item = changed.config.catalog.find((item: { sku: string }) => item.sku === 'SCAN-UNIT');
