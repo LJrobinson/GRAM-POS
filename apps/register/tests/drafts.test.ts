@@ -152,3 +152,43 @@ test('authoritative review never clears a journal replaced during its state read
   const workspace = new DraftWorkspace(async <T>(name: string) => { if (name === 'get_state') { if (replaceDuringRead) local.setItem(DRAFT_PENDING_KEY, JSON.stringify(pending)); return remote as T; } throw error('STALE_DRAFT'); }, local, () => 'own'); workspace.initialize(state()); workspace.change([measured]); await assert.rejects(workspace.flush());
   replaceDuringRead = true; await assert.rejects(workspace.acceptCurrent(), /record changed while loading/); assert.equal(local.getItem(DRAFT_PENDING_KEY), JSON.stringify(pending)); assert.deepEqual(workspace.view.lines, [measured]); assert.equal(workspace.blocked, true);
 });
+
+// serde_json::Value sorts object keys on the real Rust command bridge. Object key order is
+// not cart content; array order and every stored quantity character still are.
+const rustWireLines: CartLine[] = JSON.parse('[{"id":"m","quantity":{"grams":"125.250","kind":"measured"},"sku":"OLIVES"},{"id":"p","quantity":{"count":"2","kind":"prepacked"},"sku":"PACK"},{"id":"u","quantity":{"count":"3","kind":"unit"},"sku":"SOAP"}]');
+test('cart equality ignores Rust JSON property order but preserves exact fields and line order', () => {
+  const localLines = [measured, pack, unit];
+  assert.notEqual(JSON.stringify(localLines), JSON.stringify(rustWireLines));
+  assert.equal(sameLines(localLines, rustWireLines), true);
+  assert.equal(sameLines(localLines, [...rustWireLines].reverse()), false);
+  assert.equal(sameLines([measured], [{ ...measured, id: 'different' }]), false);
+  assert.equal(sameLines([measured], [{ ...measured, sku: 'olives' }]), false);
+  assert.equal(sameLines([unit], [{ ...unit, quantity: { kind: 'prepacked', count: '3' } }]), false);
+  assert.equal(sameLines([measured], [{ ...measured, quantity: { kind: 'measured', grams: '125.25' } }]), false);
+  assert.equal(sameLines([unit], [{ ...unit, quantity: { kind: 'unit', count: '03' } }]), false);
+  assert.equal(sameLines([{ ...unit, quantity: { kind: 'unit', count: '' } }], [{ quantity: { count: '', kind: 'unit' }, sku: unit.sku, id: unit.id }]), true);
+});
+test('normal autosave accepts Rust wire field order without false recovery or a second save', async () => {
+  const local = storage(); let calls = 0; const errors: string[] = [];
+  const workspace = new DraftWorkspace(async <T>(name: string) => { calls++; assert.equal(name, 'save_active_draft'); return state('1', rustWireLines, 'active') as T; }, local, () => 'key');
+  workspace.subscribe(() => { if (workspace.view.error) errors.push(workspace.view.error); });
+  workspace.initialize(state()); workspace.change([measured, pack, unit]); await workspace.flush();
+  assert.equal(workspace.blocked, false); assert.equal(workspace.dirty, false); assert.equal(workspace.view.conflict, null); assert.deepEqual(errors, []); assert.equal(local.getItem(DRAFT_PENDING_KEY), null);
+  await workspace.flush(); assert.equal(calls, 1);
+  assert.equal(workspace.change([...rustWireLines, { ...unit, id: 'next' }]), true);
+});
+
+test('recovery stays visible throughout an exact retry, unlike an ordinary in-flight autosave', async () => {
+  const local = storage(); const response = deferred<RegisterState>(); let calls = 0;
+  const workspace = new DraftWorkspace(async <T>() => { if (++calls === 1) throw new Error('lost response'); return await response.promise as T; }, local, () => 'key');
+  workspace.initialize(state()); workspace.change([measured]); const first = workspace.flush();
+  assert.equal(workspace.view.busy, true); assert.equal(workspace.view.error, '');
+  await assert.rejects(first); assert.notEqual(workspace.view.error, '');
+  const recoveryMessage = workspace.view.error; const retry = workspace.retry(); assert.equal(workspace.view.error, recoveryMessage); assert.equal(workspace.view.busy, true); assert.notEqual(workspace.view.error, ''); assert.equal(workspace.blocked, true);
+  response.resolve(state('1', [rustWireLines[0]], 'active')); await retry;
+  assert.equal(workspace.view.error, ''); assert.equal(workspace.view.pending, null); assert.equal(workspace.blocked, false);
+});
+test('startup pending journal keeps its recovery presentation before any retry starts', () => {
+  const local = storage(); local.setItem(DRAFT_PENDING_KEY, JSON.stringify(pending));
+  const workspace = new DraftWorkspace(async <T>() => state() as T, local, () => 'unused'); workspace.initialize(state()); assert.notEqual(workspace.view.error, ''); assert.equal(workspace.view.busy, false);
+});

@@ -8,8 +8,12 @@ const randomUUID = () => crypto.randomUUID();
 // it never supplies mock application state, prices, or persistence outcomes.
 const command = async (request: APIRequestContext, name: string, payload: unknown = {}) => {
   const response = await request.post('/api/command', { data: { command: name, payload } });
-  expect(response.ok()).toBe(true);
-  return response.json();
+  const result = await response.json();
+  // Domain rejections are HTTP 400, not transport failures. Callers still
+  // assert success or the specific expected rejection and persisted state.
+  expect(typeof result.ok).toBe('boolean');
+  expect(response.status(), JSON.stringify(result)).toBe(result.ok ? 200 : 400);
+  return result;
 };
 const api = async (request: APIRequestContext, name: string, payload: unknown = {}) => {
   const result = await command(request, name, payload);
@@ -234,6 +238,7 @@ test('another active cart blocks resume until an explicitly confirmed clear', as
   const before = await api(request, 'get_state');
   const rejected = await command(request, 'resume_parked_draft', { idempotency_key: randomUUID(), draft_id: id, expected_draft_revision: before.draft_revision, expected_config_revision: before.config_revision });
   expect(rejected.ok).toBe(false);
+  expect(rejected.error.code).toBe('ACTIVE_DRAFT_NOT_EMPTY');
   expect((await api(request, 'get_state')).draft).toEqual(before.draft);
   expect((await api(request, 'get_state')).parked_drafts).toEqual(before.parked_drafts);
   await parkedDialog(page).getByRole('button', { name: 'Close dialog', exact: true }).click();
@@ -278,7 +283,16 @@ for (const action of ['park', 'resume'] as const) {
     expect(attempts).toHaveLength(1);
     await reloadRegister(page);
     await expect(recovery).toBeVisible();
+    // A modal render alone is not proof that its replay finished. Wait for
+    // the actual successful response and cleared journal before checking
+    // the exact two-request invariant.
+    const replayed = page.waitForResponse(response => response.url().endsWith('/api/command')
+      && response.request().postDataJSON()?.command === name);
     await recovery.getByRole('button', { name: 'Retry saved action', exact: true }).click();
+    const response = await replayed;
+    expect(response.status()).toBe(200);
+    expect((await response.json()).ok).toBe(true);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('gram.draft.pending.v1'))).toBeNull();
     await expect(recovery).toHaveCount(0);
     expect(attempts).toHaveLength(2);
     expect(attempts[1]).toEqual(attempts[0]);
@@ -446,6 +460,7 @@ test('resumed checkout consumes its draft identity once even when the committed 
   expect((await api(request, 'get_state')).active_draft).toBeNull();
   const stale = await command(request, 'resume_parked_draft', { idempotency_key: randomUUID(), draft_id: id, expected_draft_revision: (await api(request, 'get_state')).draft_revision, expected_config_revision: initial.config_revision });
   expect(stale.ok).toBe(false);
+  expect(stale.error.code).toBe('DRAFT_NOT_FOUND');
   expect((await api(request, 'list_sales')).sales).toHaveLength(before.sales.length + 1);
 });
 

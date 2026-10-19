@@ -13,7 +13,19 @@ export type DraftRequest =
 export type PendingDraft = DraftRequest & { source_lines: CartLine[] };
 export const DRAFT_PENDING_KEY = 'gram.draft.pending.v1';
 export type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-export const sameLines = (left: CartLine[], right: CartLine[]) => JSON.stringify(left) === JSON.stringify(right);
+/** Rust JSON objects may reorder their keys. Compare cart meaning, never numeric-normalize quantities. */
+export function sameLines(left: CartLine[], right: CartLine[]): boolean {
+  return left.length === right.length && left.every((line, index) => {
+    const other = right[index];
+    if (line.id !== other.id || line.sku !== other.sku) return false;
+    switch (line.quantity.kind) {
+      case 'measured': return other.quantity.kind === 'measured' && line.quantity.grams === other.quantity.grams;
+      case 'unit': return other.quantity.kind === 'unit' && line.quantity.count === other.quantity.count;
+      case 'prepacked': return other.quantity.kind === 'prepacked' && line.quantity.count === other.quantity.count;
+      default: return false;
+    }
+  });
+}
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string';
 const nonempty = (value: unknown): value is string => text(value) && value.length > 0;
@@ -86,7 +98,9 @@ export class DraftWorkspace {
   };
   private send(pending: PendingDraft): Promise<void> {
     if (this.inFlight) return Promise.reject(new Error('Another saved cart action is still running.'));
-    this.update({ pending, busy: true, error: '', conflict: null });
+    // A retry keeps its recovery presentation mounted until the outcome is known.
+    // Ordinary saves enter error-free because new mutations are blocked after a failure.
+    this.update({ pending, busy: true, conflict: null });
     const serialized = JSON.stringify(pending);
     const task = (async () => {
       try {
