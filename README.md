@@ -91,7 +91,7 @@ The print layout contains only the selected original receipt, not register contr
 
 ### Unit products and focused barcode scanning (milestone 6)
 
-These original captures come from the [passing milestone-6 real-browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39183752395/job/117842092332) for PR head `2cdb0b2`. All nine scenarios passed using the real Rust service and SQLite, including delayed-scan cancellation and repeated scans. Training fixtures include intentionally extreme currency values from the exact-arithmetic tests; they are not real business records or hardware certification.
+These original captures come from the [passing milestone-6 real-browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39184353224/job/117843819615) for PR head `36b2428`. All nine scenarios passed using the real Rust service and SQLite, including delayed-scan cancellation and repeated scans. Training fixtures include intentionally extreme currency values from the exact-arithmetic tests; they are not real business records or hardware certification.
 
 <details>
 <summary>View two deliberate unit scans and their exact total</summary>
@@ -106,6 +106,28 @@ The focused barcode field added two separate one-unit lines at $4.25 each, total
 <summary>View the phone scanner and count-based cart</summary>
 
 ![GRAM phone layout with a dedicated barcode field and whole-item cart quantities](docs/screenshots/unit-scanner-phone.png)
+
+</details>
+
+<details>
+<summary>View the unit-product editor and exact barcode</summary>
+
+A unit product has an exact barcode string and a price per item, with no declared gram content. These are original browser element captures, not reconstructed mockups.
+
+![GRAM unit product editor retaining leading zeros in its barcode with fixed per-unit pricing](docs/screenshots/unit-product-editor-desktop.png)
+
+![GRAM mobile unit product editor with no declared gram field](docs/screenshots/unit-product-editor-phone.png)
+
+</details>
+
+<details>
+<summary>View an immutable count-based receipt on desktop and phone</summary>
+
+Three units at $4.25 total $12.75, with $20.00 cash received and $7.25 change. The phone modal scrolls to its remaining refund/print controls. CI also verifies this original receipt remains unchanged after catalog edits and a full refund.
+
+![GRAM saved receipt with three units and exact original price, total, tender and change](docs/screenshots/unit-receipt-desktop.png)
+
+![GRAM phone receipt showing unit count and exact money without fictional weight](docs/screenshots/unit-receipt-phone.png)
 
 </details>
 
