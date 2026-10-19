@@ -86,7 +86,7 @@ is original project geometry, with editable source in `icons/icon.svg`.
 
 
 Version 0.4 added local training cash sessions and full-sale refunds. In the current
-0.9.0 app, recognized schema-1/2 databases migrate transactionally to schema 3 without
+0.10.0 app, recognized schema-1/2/3 databases migrate transactionally to schema 4 without
 rewriting old receipts. Keep a pre-upgrade backup and do not reopen the upgraded
 file with an older app. The existing bounded IPC command handles the ledger;
 no new filesystem/network permissions or payment integration are added.
@@ -117,3 +117,12 @@ Park, preview, resume and discard use the existing bounded `register_command` di
 The frontend requires Web Locks for safe same-origin recovery-key coordination. It checks the capability at runtime and refuses cart writes if unavailable; it does not substitute a non-atomic browser-storage lock. The Windows package bundles WebView2 installation support, but native UI/runtime capability still needs actual platform verification beyond Rust dispatcher tests.
 
 The existing Windows origin is deliberately unchanged: Tauri documents the default as `http://<scheme>.localhost` ([configuration reference](https://v2.tauri.app/reference/config/#windowconfig)); its maintainer confirms `http://tauri.localhost` is treated as a secure desktop origin ([upstream discussion](https://github.com/tauri-apps/tauri/issues/12331)). This matches the [W3C secure-context rules for `.localhost`](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy). Changing `useHttpsScheme` between releases changes browser storage location, so the upgrade must not silently switch schemes and orphan existing pending checkout keys. Browser CI also probes the exact Windows origin with Chromium, but this remains engine/origin evidence, not a running Tauri/WebView2 UI certification.
+
+
+## Cash paid-in/out (0.10.0)
+
+The existing bounded `register_command` dispatcher accepts reviewed cash-movement operations; no new native capability, arbitrary path, shell, hardware or live-payment permission is added. Positive paid-ins/out belong to an open matching-currency session and are immutable, independently identified, idempotent records. They do not create a receipt or change revenue. The service checks paid-out limits and closing revisions inside its serialized transaction.
+
+Portable backup/schema v4 includes movements and their recovery/audit data with parked carts. Sales JSON format v3 separates movements from sales/refunds. Offline recovery still accepts v1/v2/v3 backups into a new destination, never overwriting the current database. See [cash workflows](../../../docs/cash-sessions.md) and [backup details](../../../docs/backup.md).
+
+Native dispatcher tests cover the movement lifecycle, retry after close/restore, stale closing reviews, overdraw and rejection of extra authority fields. Running their portable extracted harness is not packaged Tauri/WebView2 execution. Real native UI, physical drawers, scanners, scales and printers still require separate testing.

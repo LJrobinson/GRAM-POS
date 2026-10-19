@@ -3,6 +3,7 @@
 //! This milestone deliberately has no production tax or payment integration.
 #![forbid(unsafe_code)]
 
+mod cash_movements;
 mod catalog_csv;
 pub use catalog_csv::{CatalogCsvIssue, CatalogCsvPreview, CatalogCsvRow, MAX_CATALOG_CSV_BYTES};
 mod drafts;
@@ -23,7 +24,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const APPLICATION_ID: i64 = 0x4752414D;
 const MAX_LINES: usize = 500;
 
@@ -173,6 +174,9 @@ impl RegisterService {
                  PRAGMA user_version = 3;"
             )?;
         }
+        if version < 4 {
+            cash_movements::migrate(&transaction)?;
+        }
         // Read required columns before accepting the file; corrupted/missing schema fails closed.
         transaction.prepare("SELECT s.revision, s.config_json, d.draft_json FROM settings s LEFT JOIN drafts d ON d.singleton=s.singleton")?;
         transaction.prepare("SELECT s.id, s.idempotency_key, s.request_json, s.created_at_unix, s.snapshot_json, r.receipt_json FROM sales s LEFT JOIN receipts r ON s.id=r.sale_id")?;
@@ -188,6 +192,7 @@ impl RegisterService {
             "SELECT revision,next_id,guarded,active_id,guarded_since_revision FROM draft_metadata WHERE singleton=1",
         )?;
         transaction.prepare("SELECT id,status,data_json,sale_id FROM draft_records")?;
+        transaction.prepare("SELECT id,session_id,idempotency_key,request_json,movement_json,sales_watermark,refunds_watermark FROM cash_movements")?;
         transaction.prepare(
             "SELECT idempotency_key,command,request_json,applied_revision FROM draft_operations",
         )?;
@@ -225,6 +230,14 @@ impl RegisterService {
             "close_cash_session" => {
                 let input = decode(payload)?;
                 encode(self.close_cash_session(input)?)
+            }
+            "record_cash_movement" => {
+                let input = decode(payload)?;
+                encode(self.record_cash_movement(input)?)
+            }
+            "get_cash_movement_by_key" => {
+                let input: KeyInput = decode(payload)?;
+                Ok(json!({"cash_movement": self.cash_movement_by_key(&input.idempotency_key)?}))
             }
             "refund_cash_sale" => {
                 let input = decode(payload)?;
@@ -1261,33 +1274,24 @@ fn session_totals(
     conn: &Connection,
     mut session: CashSession,
 ) -> Result<CashSession, ServiceError> {
-    let mut sales: u128 = 0;
-    let mut refunds: u128 = 0;
-    let mut count: u64 = 0;
+    let mut totals = cash_movements::Totals::default();
     let mut stmt = conn.prepare("SELECT r.receipt_json FROM sale_sessions m JOIN receipts r ON r.sale_id=m.sale_id WHERE m.session_id=?1")?;
     for row in stmt.query_map([&session.session_id], |r| r.get::<_, String>(0))? {
         let receipt: Receipt = decode_stored(&row?)?;
-        sales += u128::from(parse_integer(&receipt.quote.total_minor, "Sale total")?);
-        count += 1;
+        totals.add_sale(parse_integer(&receipt.quote.total_minor, "Sale total")?)?;
     }
     let mut stmt = conn.prepare("SELECT receipt_json FROM refunds WHERE session_id=?1")?;
     for row in stmt.query_map([&session.session_id], |r| r.get::<_, String>(0))? {
         let receipt: RefundReceipt = decode_stored(&row?)?;
-        refunds += u128::from(parse_integer(&receipt.amount_minor, "Refund total")?);
-        count += 1;
+        totals.add_refund(parse_integer(&receipt.amount_minor, "Refund total")?)?;
     }
-    let opening = i128::from(parse_integer(
-        &session.opening_float_minor,
-        "Opening float",
-    )?);
-    let sales = i128::try_from(sales)
-        .map_err(|_| ServiceError::new("STORAGE_ERROR", "Cash total overflow."))?;
-    let refunds = i128::try_from(refunds)
-        .map_err(|_| ServiceError::new("STORAGE_ERROR", "Cash total overflow."))?;
-    session.sales_total_minor = sales.to_string();
-    session.refunds_total_minor = refunds.to_string();
-    session.expected_cash_minor = (opening + sales - refunds).to_string();
-    session.movement_count = count.to_string();
+    for movement in cash_movements::read(conn, Some(&session.session_id))? {
+        totals.add_movement(
+            movement.kind,
+            parse_integer(&movement.amount_minor, "Cash amount")?,
+        )?;
+    }
+    totals.apply(&mut session)?;
     Ok(session)
 }
 impl RegisterService {
@@ -1358,6 +1362,8 @@ impl RegisterService {
             opening_float_minor: opening.to_string(),
             sales_total_minor: "0".into(),
             refunds_total_minor: "0".into(),
+            paid_in_total_minor: "0".into(),
+            paid_out_total_minor: "0".into(),
             expected_cash_minor: opening.to_string(),
             movement_count: "0".into(),
             closed_at_unix: None,
@@ -1540,6 +1546,7 @@ impl RegisterService {
                 refunds.push(decode_stored(&row?)?);
             }
         }
+        let cash_movements = cash_movements::read(&tx, None)?;
         let sale_sessions = {
             let mut stmt =
                 tx.prepare("SELECT sale_id,session_id FROM sale_sessions ORDER BY sale_id")?;
@@ -1562,6 +1569,7 @@ impl RegisterService {
             active_session,
             sessions,
             refunds,
+            cash_movements,
             sale_sessions,
         })
     }

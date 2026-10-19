@@ -15,6 +15,7 @@ export function writeCheckoutJournal(storage: DraftStorage, payload: CheckoutPay
   const serialized = JSON.stringify(payload);
   const existing = storage.getItem(CHECKOUT_PENDING_KEY);
   if (existing && existing !== serialized) throw new Error('Another window has an unresolved checkout. Recover it there first. This checkout was not sent.');
+  if (!recovering && storage.getItem('gram.ledger.pending.v1') !== null) throw new Error('A cash action needs recovery before starting a checkout.');
   if (!recovering && storage.getItem('gram.draft.pending.v1')) throw new Error('A saved cart action needs recovery before starting a checkout.');
   storage.setItem(CHECKOUT_PENDING_KEY, serialized);
 }

@@ -679,8 +679,8 @@ mod tests {
         );
         let export = generate_export(&service.lock().unwrap(), "backup", None).unwrap();
         let backup: Value = serde_json::from_str(&export.content).unwrap();
-        assert_eq!(backup["format_version"], 3);
-        assert_eq!(backup["schema_version"], 3);
+        assert_eq!(backup["format_version"], 4);
+        assert_eq!(backup["schema_version"], 4);
         assert!(export.content.contains("Counter 2"));
         let resumed = dispatch(&service,"resume_parked_draft",serde_json::json!({
             "idempotency_key":"native-resume", "expected_draft_revision":parked["draft_revision"],
@@ -749,5 +749,126 @@ mod tests {
                 .code,
             "GUARDED_DRAFT_REQUIRED"
         );
+    }
+
+    #[test]
+    fn cash_movements_are_separate_immutable_dispatch_records() {
+        let service = Arc::new(Mutex::new(RegisterService::in_memory().unwrap()));
+        let initial = dispatch(&service, "initialize_demo", serde_json::json!({})).unwrap();
+        let currency = initial["config"]["currency"].clone();
+        let opened = dispatch(&service, "open_cash_session", serde_json::json!({
+            "idempotency_key":"native-movement-open", "opening_float_minor":"5000", "expected_currency":currency
+        })).unwrap();
+        let request = serde_json::json!({
+            "idempotency_key":"native-paid-in", "expected_session_id":opened["session_id"],
+            "expected_currency":currency,"kind":"paid_in","amount_minor":"2000","reason":"Extra change float"
+        });
+        let paid_in = dispatch(&service, "record_cash_movement", request.clone()).unwrap();
+        assert_eq!(paid_in["kind"], "paid_in");
+        assert_eq!(paid_in["amount_minor"], "2000");
+        assert_eq!(
+            dispatch(&service, "record_cash_movement", request.clone()).unwrap(),
+            paid_in
+        );
+        assert_eq!(
+            dispatch(
+                &service,
+                "get_cash_movement_by_key",
+                serde_json::json!({
+                    "idempotency_key":"native-paid-in"
+                })
+            )
+            .unwrap()["cash_movement"],
+            paid_in
+        );
+        let mut paid_out_request = request.clone();
+        paid_out_request["idempotency_key"] = serde_json::json!("native-paid-out");
+        paid_out_request["kind"] = serde_json::json!("paid_out");
+        paid_out_request["amount_minor"] = serde_json::json!("1500");
+        paid_out_request["reason"] = serde_json::json!("Training cash removal");
+        let paid_out = dispatch(&service, "record_cash_movement", paid_out_request).unwrap();
+        assert_ne!(paid_in["movement_id"], paid_out["movement_id"]);
+        let ledger = dispatch(&service, "get_cash_ledger", serde_json::json!({})).unwrap();
+        assert_eq!(ledger["active_session"]["sales_total_minor"], "0");
+        assert_eq!(ledger["active_session"]["refunds_total_minor"], "0");
+        assert_eq!(ledger["active_session"]["paid_in_total_minor"], "2000");
+        assert_eq!(ledger["active_session"]["paid_out_total_minor"], "1500");
+        assert_eq!(ledger["active_session"]["expected_cash_minor"], "5500");
+        assert_eq!(ledger["active_session"]["movement_count"], "2");
+        assert_eq!(ledger["cash_movements"].as_array().unwrap().len(), 2);
+        assert_eq!(ledger["refunds"], serde_json::json!([]));
+        assert_eq!(
+            dispatch(&service, "list_sales", serde_json::json!({})).unwrap()["sales"],
+            serde_json::json!([])
+        );
+        let closed = dispatch(&service,"close_cash_session",serde_json::json!({
+            "session_id":opened["session_id"],"expected_movement_count":"2","counted_minor":"5500"
+        })).unwrap();
+        assert_eq!(closed["variance_minor"], "0");
+        assert_eq!(
+            dispatch(&service, "record_cash_movement", request.clone()).unwrap(),
+            paid_in
+        );
+        let after_retry = dispatch(&service, "get_cash_ledger", serde_json::json!({})).unwrap();
+        assert_eq!(after_retry["cash_movements"].as_array().unwrap().len(), 2);
+        assert_eq!(after_retry["sessions"][0], closed);
+        let exported = generate_export(&service.lock().unwrap(), "backup", None).unwrap();
+        let restored_path = csv_test_path("sqlite3");
+        RegisterService::restore_backup(&exported.content, &restored_path).unwrap();
+        let restored_service = Arc::new(Mutex::new(RegisterService::open(&restored_path).unwrap()));
+        assert_eq!(
+            dispatch(&restored_service, "record_cash_movement", request).unwrap(),
+            paid_in
+        );
+        assert_eq!(
+            dispatch(&restored_service, "get_cash_ledger", serde_json::json!({})).unwrap(),
+            after_retry
+        );
+        drop(restored_service);
+        std::fs::remove_file(restored_path).unwrap();
+    }
+
+    #[test]
+    fn cash_movement_dispatch_rejects_extra_authority_and_stale_close() {
+        let service = Arc::new(Mutex::new(RegisterService::in_memory().unwrap()));
+        let initial = dispatch(&service, "initialize_demo", serde_json::json!({})).unwrap();
+        let currency = initial["config"]["currency"].clone();
+        let opened = dispatch(&service,"open_cash_session",serde_json::json!({
+            "idempotency_key":"native-guard-open","opening_float_minor":"5000","expected_currency":currency
+        })).unwrap();
+        let mut request = serde_json::json!({
+            "idempotency_key":"native-guard-movement","expected_session_id":opened["session_id"],
+            "expected_currency":currency,"kind":"paid_out","amount_minor":"5001","reason":"Training cash removal"
+        });
+        assert_eq!(
+            dispatch(&service, "record_cash_movement", request.clone())
+                .unwrap_err()
+                .code,
+            "INSUFFICIENT_CASH"
+        );
+        request["amount_minor"] = serde_json::json!("1000");
+        request["path"] = serde_json::json!("arbitrary.sqlite3");
+        assert_eq!(
+            dispatch(&service, "record_cash_movement", request.clone())
+                .unwrap_err()
+                .code,
+            "INVALID_INPUT"
+        );
+        request.as_object_mut().unwrap().remove("path");
+        let movement = dispatch(&service, "record_cash_movement", request.clone()).unwrap();
+        request["reason"] = serde_json::json!("Different request");
+        assert_eq!(
+            dispatch(&service, "record_cash_movement", request)
+                .unwrap_err()
+                .code,
+            "IDEMPOTENCY_CONFLICT"
+        );
+        assert_eq!(dispatch(&service,"close_cash_session",serde_json::json!({
+            "session_id":opened["session_id"],"expected_movement_count":"0","counted_minor":"4000"
+        })).unwrap_err().code,"STALE_SESSION");
+        let ledger = dispatch(&service, "get_cash_ledger", serde_json::json!({})).unwrap();
+        assert!(ledger["active_session"]["closed_at_unix"].is_null());
+        assert_eq!(ledger["active_session"]["expected_cash_minor"], "4000");
+        assert_eq!(ledger["cash_movements"], serde_json::json!([movement]));
     }
 }

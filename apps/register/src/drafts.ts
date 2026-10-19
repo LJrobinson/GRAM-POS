@@ -109,6 +109,7 @@ export class DraftWorkspace {
         const existing = this.storage.getItem(DRAFT_PENDING_KEY);
         if (existing && existing !== serialized) throw new Error('Another window has an unresolved cart action. Resolve it there first, then retry here. Your local lines have not been changed.');
         if (this.storage.getItem('gram.checkout.pending.v1')) throw new Error('A checkout needs recovery before this cart action. Resolve it in its window first, then retry here.');
+        if (this.storage.getItem('gram.ledger.pending.v1') !== null) throw new Error('A cash action needs recovery before this cart action. Resolve it first, then retry here.');
         // The journal write must succeed before any request can leave this browser. Keep unsent work in memory for retry.
         try { this.storage.setItem(DRAFT_PENDING_KEY, serialized); }
         catch { throw new Error('This browser could not keep a recovery record. No cart request was sent. Make browser storage available, then retry here without reloading.'); }
@@ -141,6 +142,7 @@ export class DraftWorkspace {
     try {
       await this.exclusive(async () => {
         if (this.storage.getItem('gram.checkout.pending.v1')) throw new Error('Resolve the pending checkout before accepting a different saved cart.');
+        if (this.storage.getItem('gram.ledger.pending.v1') !== null) throw new Error('Resolve the pending cash action before accepting a different saved cart.');
         if (this.view.pending && this.storage.getItem(DRAFT_PENDING_KEY) !== JSON.stringify(this.view.pending)) throw new Error('Another window owns the recovery record. Resolve its pending action before adopting saved state here.');
         const current = await this.command<RegisterState>('get_state');
         if (!sameLines(current.draft.lines, reviewed.draft.lines) || current.active_draft?.id !== reviewed.active_draft?.id) {

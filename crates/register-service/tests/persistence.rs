@@ -283,7 +283,7 @@ fn saved_sale_and_receipt_rows_reject_updates_and_deletes() {
 #[test]
 fn future_schema_and_foreign_database_are_not_overwritten() {
     for sql in [
-        "PRAGMA user_version=4;",
+        "PRAGMA user_version=5;",
         "CREATE TABLE unrelated(secret TEXT);",
         "PRAGMA application_id=123;",
     ] {

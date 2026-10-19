@@ -265,6 +265,37 @@ pub struct RefundReceipt {
     pub currency: CurrencyDto,
     pub payment_method: String,
 }
+/// A cash-only drawer adjustment, never a sale or a refund.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CashMovementKind {
+    PaidIn,
+    PaidOut,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CashMovementInput {
+    pub idempotency_key: String,
+    pub kind: CashMovementKind,
+    pub amount_minor: String,
+    pub reason: String,
+    pub expected_session_id: String,
+    pub expected_currency: CurrencyDto,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CashMovement {
+    pub movement_id: String,
+    pub created_at_unix: String,
+    pub session_id: String,
+    pub kind: CashMovementKind,
+    pub amount_minor: String,
+    pub reason: String,
+    pub currency: CurrencyDto,
+}
+fn zero_minor() -> String {
+    "0".into()
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CashSession {
@@ -274,6 +305,10 @@ pub struct CashSession {
     pub opening_float_minor: String,
     pub sales_total_minor: String,
     pub refunds_total_minor: String,
+    #[serde(default = "zero_minor")]
+    pub paid_in_total_minor: String,
+    #[serde(default = "zero_minor")]
+    pub paid_out_total_minor: String,
     pub expected_cash_minor: String,
     pub movement_count: String,
     pub closed_at_unix: Option<String>,
@@ -292,6 +327,7 @@ pub struct CashLedger {
     pub active_session: Option<CashSession>,
     pub sessions: Vec<CashSession>,
     pub refunds: Vec<RefundReceipt>,
+    pub cash_movements: Vec<CashMovement>,
     pub sale_sessions: Vec<SaleSession>,
 }
 

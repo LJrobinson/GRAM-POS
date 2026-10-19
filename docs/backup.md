@@ -13,7 +13,7 @@ exact strings; no spreadsheet floating-point conversion occurs.
 Use **Download portable backup** for a versioned logical snapshot of the whole register:
 current configuration and revision, any draft, all sales and original checkout
 requests/idempotency keys, immutable sale snapshots and receipts, cash sessions,
-closing counts, refunds, sale/session links, and all sequence high-water marks. Backup is not a sales report. Keep both if needed.
+closing counts, refunds, sale/session links, paid-in/out cash movements, durable active/parked carts and all sequence high-water marks. Backup is not a sales report. Keep both if needed.
 
 Exports use one SQLite read transaction, so another process cannot mix settings
 from one moment with sales from another. A backup never clears the draft or
@@ -90,7 +90,7 @@ sequence high water, constraints and immutability triggers; recomputing receipts
 from today's catalog or re-running checkouts is **not** recovery.
 
 
-## Portable format v2 (current export)
+## Portable format v2 (historical ledger format)
 
 Milestone-4 through milestone-8 exports use numeric `format_version: 2`. The `gram-pos-sales` report
 retains `receipts` and also includes the cash ledger, so gross original receipts
@@ -133,8 +133,21 @@ Catalog CSV is not a backup and cannot restore sales or pricing schedules. Impor
 
 ## Durable carts and backup v3 (0.9.0)
 
-Recognized schema-1/2 databases migrate transactionally to schema 3 on open. Existing sale/request/receipt bytes are unchanged. Current portable backups use format/schema version 3 and include the active draft identity, global draft revision, parked carts and persisted mutation keys in the same consistent snapshot as configuration and the immutable cash ledger. Successful checkout retires the active identity atomically with the receipt, so recovering a parked cart cannot duplicate its sale through a second checkout key.
+Recognized schema-1/2 databases migrate transactionally to schema 3 on open. Existing sale/request/receipt bytes are unchanged. Milestone-9 portable backups use format/schema version 3 and include the active draft identity, global draft revision, parked carts and persisted mutation keys in the same consistent snapshot as configuration and the immutable cash ledger. Successful checkout retires the active identity atomically with the receipt, so recovering a parked cart cannot duplicate its sale through a second checkout key.
 
 The restore tool continues to accept valid v1 and v2 backups, including pre-settings golden backups. It does not reinterpret original measured, package or unit quantities against today's catalog. Restored draft lines may be unavailable or incompatible with current products; preview exposes these issues before ordinary checkout. Backups include retained completed/discarded draft lifecycle and operation records; discard is not secure erasure. Backups are unencrypted and now also contain optional cart labels, so labels should contain no customer or other personal information.
 
 Parked carts are deliberately excluded from the separate sales JSON/report exports. Those files are not a substitute for a full backup and cannot restore unfinished carts. Back up before upgrading and do not open a schema-3 store with an older application. Restore into a new file only; do not replace the active database while the register is running. See [parked-cart recovery](parked-carts.md).
+
+
+## Cash movements and backup v4 (0.10.0)
+
+Current portable backups use numeric format/schema version **4**. Recognized schema-1/2/3 databases migrate transactionally to schema 4; older raw receipt, checkout, session and draft records are not rewritten. The restore tool accepts valid v1/v2/v3 backups as well as v4. Before opening an existing store with 0.10.0, keep a separate pre-upgrade backup; an older app cannot open the upgraded database.
+
+Version 4 adds dedicated immutable cash-movement rows, exact idempotency request bytes and a sequence high-water mark. Rows record paid-in or paid-out, exact positive amount, bounded reason, session, currency/precision and recorded time. Internal sale/refund watermarks identify the source events already committed when each movement was recorded. These watermarks let recovery validate the paid-out limit in transaction order without treating wall-clock timestamps as reliable ordering. A rollback of the clock is not itself corruption.
+
+Recovery rejects invalid identities, duplicate keys, missing or inconsistent session links, currency/precision mismatches, invalid amounts/reasons, inconsistent source-event watermarks, paid-outs exceeding their replayed available cash, incorrect aggregate totals or closing movement counts, and sequence bounds below surviving records. Validated restore recreates immutable constraints in the new file. It does not replay hardware, transfer money, or create a sale. It preserves original request/entry bytes so a previously committed movement remains recoverable with the same key after restore, including after its session closed.
+
+The separate **sales JSON export uses format version 3**, retains original receipts and refunds, and adds explicitly separated cash-movement data. Paid-ins/out are not revenue or fabricated sales. Sales reports and revenue CSV remain derived only from original sales and full refunds. A sales export is not a backup and cannot restore the register's unfinished carts or all recovery history.
+
+Exports and backups are unencrypted. Keep reasons and cart labels nonpersonal, and protect these files as business records. Logical replay checks detect inconsistent history but are not a signature, tamper-proof audit or financial certification. See the [cash-session guide](cash-sessions.md) for the conservative overdraw rule and operator review workflow.

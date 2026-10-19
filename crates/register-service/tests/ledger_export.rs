@@ -73,7 +73,7 @@ fn v2_roundtrip_preserves_ledger_raw_bytes_and_sequences() {
         .unwrap();
     assert_eq!(opened["session_id"], "41");
     let export: Value = serde_json::from_str(&r.export_sales().unwrap().content).unwrap();
-    assert_eq!(export["format_version"], 2);
+    assert_eq!(export["format_version"], 3);
     assert_eq!(export["refunds"].as_array().unwrap().len(), 1);
     assert_eq!(export["sessions"].as_array().unwrap().len(), 2);
     assert_eq!(export["sale_sessions"].as_array().unwrap().len(), 1);
@@ -165,6 +165,8 @@ fn v1_import_classifies_old_sales_as_legacy_without_rewriting_receipts() {
         "refunds_sequence",
         "legacy_sale_max_id",
         "draft_workflow",
+        "cash_movements",
+        "cash_movements_sequence",
     ] {
         value.as_object_mut().unwrap().remove(key);
     }
@@ -174,7 +176,7 @@ fn v1_import_classifies_old_sales_as_legacy_without_rewriting_receipts() {
     RegisterService::restore_backup(&value.to_string(), &p).unwrap();
     let r = RegisterService::open(&p).unwrap();
     let converted: Value = serde_json::from_str(&r.export_backup().unwrap().content).unwrap();
-    assert_eq!(converted["format_version"], 3);
+    assert_eq!(converted["format_version"], 4);
     assert_eq!(converted["legacy_sale_max_id"], "1");
     assert_eq!(converted["sales"], value["sales"]);
     assert!(r.cash_ledger().unwrap().sessions.is_empty());
@@ -229,6 +231,8 @@ fn clock_rollback_does_not_invalidate_ledger_or_legacy_refunds() {
         "refunds_sequence",
         "legacy_sale_max_id",
         "draft_workflow",
+        "cash_movements",
+        "cash_movements_sequence",
     ] {
         backup.as_object_mut().unwrap().remove(key);
     }

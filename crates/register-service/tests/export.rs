@@ -101,7 +101,7 @@ fn sales_export_has_full_original_receipts_and_exact_strings() {
     let v: Value = serde_json::from_str(&file.content).unwrap();
     assert_eq!(file.media_type, "application/json");
     assert_eq!(v["format"], "gram-pos-sales");
-    assert_eq!(v["format_version"], 2);
+    assert_eq!(v["format_version"], 3);
     assert_eq!(v["receipts"][0], serde_json::to_value(receipt).unwrap());
     assert_eq!(v["receipts"][0]["quote"]["total_minor"], "3000");
     assert_eq!(

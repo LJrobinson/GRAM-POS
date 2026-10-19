@@ -1,12 +1,17 @@
 use gram_register_service::*;
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use std::sync::{Arc, Barrier};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Barrier,
+};
+static NEXT_PATH: AtomicU64 = AtomicU64::new(0);
 
 fn path() -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "gram-draft-{}-{}.sqlite",
+        "gram-draft-{}-{}-{}.sqlite",
         std::process::id(),
+        NEXT_PATH.fetch_add(1, Ordering::Relaxed),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -759,7 +764,7 @@ fn schema_two_migration_preserves_legacy_draft_and_sale_bytes_then_allocates_ide
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    c.execute_batch("DROP TABLE draft_metadata; DROP TABLE draft_operations; DROP TABLE draft_records; PRAGMA user_version=2;").unwrap();
+    c.execute_batch("DROP TABLE cash_movements; DROP TABLE draft_metadata; DROP TABLE draft_operations; DROP TABLE draft_records; PRAGMA user_version=2;").unwrap();
     drop(c);
     let mut s = RegisterService::open(&file).unwrap();
     assert_eq!(s.state().unwrap().draft.lines, lines());
@@ -779,7 +784,7 @@ fn schema_two_migration_preserves_legacy_draft_and_sale_bytes_then_allocates_ide
     assert_eq!(
         c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
     drop(c);
     s.export_backup().unwrap();

@@ -192,3 +192,16 @@ test('startup pending journal keeps its recovery presentation before any retry s
   const local = storage(); local.setItem(DRAFT_PENDING_KEY, JSON.stringify(pending));
   const workspace = new DraftWorkspace(async <T>() => state() as T, local, () => 'unused'); workspace.initialize(state()); assert.notEqual(workspace.view.error, ''); assert.equal(workspace.view.busy, false);
 });
+
+test('pending cash recovery blocks cart writes and preserves malformed cash evidence', async () => {
+  for (const cashRecord of ['pending', '{}', '']) {
+    const local = storage(); let calls = 0;
+    const workspace = new DraftWorkspace(async <T>() => { calls++; return state() as T; }, local, () => 'own'); workspace.initialize(state()); workspace.change([unit]); local.setItem('gram.ledger.pending.v1', cashRecord);
+    await assert.rejects(workspace.flush(), /cash action needs recovery/); assert.equal(calls, 0); assert.equal(local.getItem(DRAFT_PENDING_KEY), null); assert.equal(local.getItem('gram.ledger.pending.v1'), cashRecord); assert.deepEqual(workspace.view.lines, [unit]);
+  }
+});
+test('saved-cart reconciliation cannot clear work while a cash action needs recovery', async () => {
+  const local = storage(); const remote = state('2', [unit], 'remote'); const workspace = new DraftWorkspace(async <T>(name: string) => { if (name === 'get_state') return remote as T; throw error('STALE_DRAFT'); }, local, () => 'own');
+  workspace.initialize(state()); workspace.change([measured]); await assert.rejects(workspace.flush()); const own = local.getItem(DRAFT_PENDING_KEY); local.setItem('gram.ledger.pending.v1', 'pending');
+  await assert.rejects(workspace.acceptCurrent(), /pending cash action/); assert.equal(local.getItem(DRAFT_PENDING_KEY), own); assert.deepEqual(workspace.view.lines, [measured]);
+});
