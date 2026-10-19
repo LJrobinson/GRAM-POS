@@ -3,6 +3,8 @@
 //! This milestone deliberately has no production tax or payment integration.
 #![forbid(unsafe_code)]
 
+mod catalog_csv;
+pub use catalog_csv::{CatalogCsvIssue, CatalogCsvPreview, CatalogCsvRow, MAX_CATALOG_CSV_BYTES};
 mod dto;
 mod export;
 mod report;
@@ -170,6 +172,22 @@ impl RegisterService {
     /// JSON command boundary shared by desktop IPC and the opt-in development server.
     pub fn handle(&mut self, command: &str, payload: Value) -> Result<Value, ServiceError> {
         match command {
+            "export_catalog_csv" => {
+                let _: EmptyInput = decode(payload)?;
+                encode(self.export_catalog_csv()?)
+            }
+            "catalog_csv_template" => {
+                let _: EmptyInput = decode(payload)?;
+                encode(self.catalog_csv_template()?)
+            }
+            "preview_catalog_csv" => {
+                let input: catalog_csv::PreviewInput = decode(payload)?;
+                encode(self.preview_catalog_csv(&input.csv)?)
+            }
+            "apply_catalog_csv" => {
+                let input: catalog_csv::ApplyInput = decode(payload)?;
+                encode(self.apply_catalog_csv(&input.csv, &input.expected_config_revision)?)
+            }
             "get_cash_ledger" => {
                 let _: EmptyInput = decode(payload)?;
                 encode(self.cash_ledger()?)
@@ -756,7 +774,16 @@ fn validate_config_inner(config: &Config) -> Result<(), ServiceError> {
     let mut barcodes = BTreeSet::new();
     for item in &config.catalog {
         validate_id(&item.sku, "SKU")?;
-        validate_id(&item.name, "Product name")?;
+        if item.name.is_empty()
+            || item.name.len() > 128
+            || item.name.trim() != item.name
+            || item
+                .name
+                .chars()
+                .any(|c| c.is_control() && c != '\n' && c != '\r')
+        {
+            return Err(ServiceError::new("INVALID_CONFIG", "Product name must contain 1–128 bytes without surrounding whitespace or controls other than embedded CR/LF."));
+        }
         if !skus.insert(&item.sku) {
             return Err(ServiceError::new(
                 "INVALID_CONFIG",

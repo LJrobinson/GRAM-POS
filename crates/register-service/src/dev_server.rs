@@ -109,15 +109,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut bytes = Vec::new();
         if request
             .as_reader()
-            .take(1_048_577)
+            .take(8_388_609)
             .read_to_end(&mut bytes)
             .is_err()
-            || bytes.len() > 1_048_576
+            || bytes.len() > 8_388_608
         {
             respond(
                 request,
                 413,
-                json!({"ok":false,"error":{"code":"INVALID_INPUT","message":"Command body is unreadable or exceeds 1 MiB."}}),
+                json!({"ok":false,"error":{"code":"INVALID_INPUT","message":"Command body is unreadable or exceeds 8 MiB."}}),
             );
             continue;
         }

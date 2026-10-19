@@ -124,3 +124,8 @@ be imported by milestone-3 binaries.
 ## Version 0.6.0 quantity compatibility
 
 Unit-product receipts preserve the `unit` quantity tag and exact count with no invented gram content. Optional catalog barcodes are preserved in configuration snapshots and backups. Older configurations without barcodes and existing measured/prepacked receipts remain valid; this feature does not change SQLite schema 2 or the supported v1/v2 portable formats. New unit records require 0.6.0 or newer, so do not downgrade an active store. Original request and receipt JSON bytes are retained, not regenerated from the new catalog.
+
+
+## Version 0.7.0 catalog CSV compatibility
+
+Catalog CSV is not a backup and cannot restore sales or pricing schedules. Import updates only catalog configuration under a revision check; existing receipt snapshots and raw history stay unchanged. SQLite schema 2 and supported portable v1/v2 formats are unchanged, with no migration. Existing backups remain valid. Newly permitted embedded CR/LF product names need 0.7.0 validation, so do not downgrade a store using those names. See [catalog CSV](catalog-csv.md).

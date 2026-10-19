@@ -4,6 +4,41 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Bulk catalog CSV (milestone 7)
+
+Version 0.7.0 adds local, versioned catalog CSV export/templates and a read-only import preview before explicit atomic Apply. SKU is the stable upsert identity; missing products are never deleted. Errors identify rows, duplicate active/archived barcodes, missing price groups, and invalid exact amounts. Revision checks prevent overwriting newer edits. Spreadsheet-safe `text:` encoding is reversible, including leading-zero barcodes and legitimate apostrophes. See the [operator guide and complete CSV format](docs/catalog-csv.md).
+
+These original captures come from the [passing real-browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39187501879/job/117853222635) at commit `946979b`. All 16 browser scenarios passed against Rust and SQLite, including seven CSV scenarios. These are training fixtures, not real business data or a native file-dialog certification.
+
+<details>
+<summary>Review a valid mixed-product import before applying</summary>
+
+Three new products and one update are staged, with saved/imported details side by side. No catalog changes have been saved in this capture.
+
+![GRAM catalog CSV preview with three proposed creates, one update and before/after product details](docs/screenshots/catalog-csv-valid-desktop.png)
+
+</details>
+
+<details>
+<summary>Inspect invalid prices and duplicate barcodes</summary>
+
+Row and physical-line errors block Apply. The duplicate check includes archived products, and an invalid price cannot become a partial import.
+
+![GRAM catalog CSV errors for invalid integer pricing and a duplicate barcode with Apply disabled](docs/screenshots/catalog-csv-invalid-desktop.png)
+
+</details>
+
+<details>
+<summary>View the CSV review and errors on a phone</summary>
+
+Review details and error text wrap within the narrow layout; further product fields and Apply remain accessible by vertical scrolling. The browser checks also apply the valid import at this viewport size.
+
+![GRAM mobile CSV preview with staged changes and expandable saved product details](docs/screenshots/catalog-csv-valid-phone.png)
+
+![GRAM mobile CSV row-level price and barcode validation errors](docs/screenshots/catalog-csv-invalid-phone.png)
+
+</details>
+
 ## See the prototype
 
 The original register/catalog/cash-session screenshots below come from the [passing milestone-4 browser CI job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) at commit `53332e4`, using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.

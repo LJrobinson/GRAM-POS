@@ -157,3 +157,34 @@ No Windows/macOS/iPhone/iPad application builds, hardware drivers, database pers
 The pricing model deliberately implements only one explicitly selected tolerance scope: once per aggregate pricing group. That scope, the below-smallest behavior, and tier-rate semantics are described in `docs/acceptance.md`; test success is not a substitute for merchant review of those policies.
 
 Public repository creation/publication, if completed after this validation, is reported independently with its verified URL. A license has not yet been selected by the owner.
+
+
+## Milestone 7 local validation (0.7.0)
+
+Based on merged main `1db7e8ad831c0bc93f1acdbb5802fd742b224eb9`: all 97 tracked local blobs matched the remote recursive tree before editing. No baseline files were silently replaced.
+
+Passed locally with Rust stable 1.99.1:
+
+- `cargo +stable fmt --all -- --check`
+- `cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings`
+- `cargo +stable test --workspace --all-targets --all-features --locked`: 120 tests including nine catalog CSV integration tests.
+- Workspace doc tests.
+- `npm run typecheck`, `npm test`: 62 frontend tests, and `npm run build`.
+- `npm run test:e2e -- --list`: 16 tests discovered, including seven new catalog CSV browser scenarios. Discovery does not execute browser tests.
+- Native `cargo fmt --manifest-path apps/register/src-tauri/Cargo.toml -- --check` and full `cargo metadata --manifest-path apps/register/src-tauri/Cargo.toml --locked --offline --format-version 1`.
+- Two extracted, unchanged native file-reader helper tests compiled and ran separately on Unix, covering safe link/FIFO rejection, byte bounds, strict UTF-8, extension and regular-file checks. This is not compilation or execution of the full Tauri host.
+
+The catalog tests cover read-only preview; atomic invalid-batch rejection; separate-connection revision race and reopen/retry; duplicate/archived barcode conflicts; exact maximum money/weight and leading zeros; malformed quoting/headers/types/control input/limits; Unicode/commas/newlines and injection-safe reversible text export; full configuration roundtrip; and unchanged receipt/sales/ledger/draft history. The UI regressions cover late/cancelled results, unsaved edits, review gating, exact before/after display, and recovery-refresh data-loss prevention.
+
+Two read-only reviews identified and fixed a native file check/open race and unsaved-edit recovery refresh path before freezing. No additional blocking findings remained.
+
+Not run locally: real Chromium browser execution/screenshots, complete native Tauri compile/tests or Windows installer. The browser executable and Linux GTK/WebKit runtime are unavailable; no denied installation/escalation was retried. The existing CI jobs must validate the exact published commit before merge. New browser tests attach actual invalid/valid desktop/phone CSV review captures; no new screenshot is claimed or fabricated here. The Windows reparse-point regression can explicitly skip if the runner lacks symlink privilege, so manual native-picker review remains useful even after CI passes.
+
+
+### Milestone 7 verified browser CI evidence
+
+At head `946979bfe204339ef6d4234920a5917aee702708`, both the PR and push browser jobs passed all **16 scenarios**, including all seven catalog CSV scenarios. The committed original CSV PNGs come from PR run [39187501879](https://github.com/LJrobinson/GRAM-POS/actions/runs/39187501879), browser job [117853222635](https://github.com/LJrobinson/GRAM-POS/actions/runs/39187501879/job/117853222635), artifact `12158324168` (`gram-pos-register-browser-review`). The downloaded original ZIP SHA256 was verified as `b62d73b479348bd30eacc32b5a153bdb7fdde5216833fc345361f2788cf1be91`.
+
+The four unmodified CSV screenshots were visually inspected: desktop valid preview shows the create/update summary and saved/imported product details; desktop invalid preview shows exact row/line price and duplicate-barcode errors with disabled Apply; phone captures show wrapped review/errors without horizontal page overflow. Screenshots are viewport captures, so lower details and actions can require vertical scrolling. Large price and formula-shaped text fixtures are intentional exact-arithmetic/injection tests, not real transactions.
+
+The narrow CI change `-- --show-output` on native tests makes the Windows reparse-point test's privilege-skip message observable in the final-head logs. It does not elevate permissions or claim a physical file-picker test. At preparation of this evidence update, both original-head Windows packaging jobs remained running. The final evidence/workflow commit must receive its own complete CI run before any all-green or installer claim.
