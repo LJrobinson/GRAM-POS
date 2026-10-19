@@ -55,6 +55,8 @@ fn cart() -> Vec<CartInputLine> {
 fn checkout(service: &RegisterService, key: &str) -> CheckoutInput {
     let quote = service.quote(&cart()).unwrap();
     CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         expected_session_id: None,
         expected_currency: None,
         idempotency_key: key.into(),
@@ -281,7 +283,7 @@ fn saved_sale_and_receipt_rows_reject_updates_and_deletes() {
 #[test]
 fn future_schema_and_foreign_database_are_not_overwritten() {
     for sql in [
-        "PRAGMA user_version=2;",
+        "PRAGMA user_version=4;",
         "CREATE TABLE unrelated(secret TEXT);",
         "PRAGMA application_id=123;",
     ] {
@@ -365,6 +367,8 @@ fn pricing_policy_edits_flow_through_core_and_receipt_stays_frozen() {
     assert_eq!(after.groups[0].billable_grams, "3.510");
     let receipt = service
         .complete_cash_sale(CheckoutInput {
+            expected_draft_id: None,
+            expected_draft_revision: None,
             expected_session_id: None,
             expected_currency: None,
             idempotency_key: "policy".into(),
@@ -457,6 +461,8 @@ fn large_minor_units_stay_exact_strings_at_json_boundary() {
         .unwrap();
     let receipt = service
         .complete_cash_sale(CheckoutInput {
+            expected_draft_id: None,
+            expected_draft_revision: None,
             expected_session_id: None,
             expected_currency: None,
             idempotency_key: "exact-u64".into(),
@@ -540,6 +546,8 @@ fn empty_catalog_can_be_built_and_archived_without_demo_seed() {
     }];
     let quote = service.quote(&lines).unwrap();
     let request = CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         expected_session_id: None,
         expected_currency: None,
         idempotency_key: "custom-sale".into(),

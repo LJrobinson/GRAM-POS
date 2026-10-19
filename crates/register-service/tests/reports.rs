@@ -47,6 +47,8 @@ fn checkout(service: &mut RegisterService, key: &str, tender: &str) -> CheckoutI
     }];
     let quote = service.quote(&lines).unwrap();
     let input = CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         idempotency_key: key.into(),
         lines,
         tender_minor: tender.into(),
@@ -233,6 +235,7 @@ fn legacy_sales_count_once_with_new_sales_and_refunds() {
         "cash_sessions_sequence",
         "refunds_sequence",
         "legacy_sale_max_id",
+        "draft_workflow",
     ] {
         saved.as_object_mut().unwrap().remove(key);
     }

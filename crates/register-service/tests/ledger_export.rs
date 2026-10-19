@@ -26,6 +26,8 @@ fn fixture() -> RegisterService {
     }];
     let q = s.quote(&lines).unwrap();
     s.complete_cash_sale(CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         expected_session_id: Some("1".into()),
         expected_currency: Some(q.currency),
         idempotency_key: "sale".into(),
@@ -162,6 +164,7 @@ fn v1_import_classifies_old_sales_as_legacy_without_rewriting_receipts() {
         "cash_sessions_sequence",
         "refunds_sequence",
         "legacy_sale_max_id",
+        "draft_workflow",
     ] {
         value.as_object_mut().unwrap().remove(key);
     }
@@ -171,7 +174,7 @@ fn v1_import_classifies_old_sales_as_legacy_without_rewriting_receipts() {
     RegisterService::restore_backup(&value.to_string(), &p).unwrap();
     let r = RegisterService::open(&p).unwrap();
     let converted: Value = serde_json::from_str(&r.export_backup().unwrap().content).unwrap();
-    assert_eq!(converted["format_version"], 2);
+    assert_eq!(converted["format_version"], 3);
     assert_eq!(converted["legacy_sale_max_id"], "1");
     assert_eq!(converted["sales"], value["sales"]);
     assert!(r.cash_ledger().unwrap().sessions.is_empty());
@@ -225,6 +228,7 @@ fn clock_rollback_does_not_invalidate_ledger_or_legacy_refunds() {
         "cash_sessions_sequence",
         "refunds_sequence",
         "legacy_sale_max_id",
+        "draft_workflow",
     ] {
         backup.as_object_mut().unwrap().remove(key);
     }
@@ -277,6 +281,8 @@ fn sale_session_mapping_cannot_reverse_transaction_order() {
         }];
         let q = s.quote(&lines).unwrap();
         s.complete_cash_sale(CheckoutInput {
+            expected_draft_id: None,
+            expected_draft_revision: None,
             expected_session_id: None,
             expected_currency: None,
             idempotency_key: format!("s{n}"),
@@ -314,6 +320,8 @@ fn refund_session_mapping_cannot_reverse_transaction_order() {
         }];
         let q = s.quote(&lines).unwrap();
         s.complete_cash_sale(CheckoutInput {
+            expected_draft_id: None,
+            expected_draft_revision: None,
             expected_session_id: None,
             expected_currency: None,
             idempotency_key: format!("s{n}"),

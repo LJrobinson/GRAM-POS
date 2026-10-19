@@ -4,6 +4,47 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Park a cart and return to it (milestone 9)
+
+Version **0.9.0** adds durable local parked carts. Save a nonempty cart with an optional short, nonpersonal label, continue another sale, then preview and resume the saved quantities. The preview uses **current catalog and prices**, not a promise to hold a price. Measured grams, package counts and unit counts remain separate; unavailable products and changed product types are flagged rather than silently removed or reinterpreted.
+
+Resume never overwrites a nonempty active cart. Park it first, or explicitly clear it. Parked-cart discard requires confirmation. Saving, parking and resuming use durable identity, revision checks and retry keys; checkout consumes the active identity in the same SQLite transaction as the receipt. Parking does not create a sale, reserve stock, record cash or add customer records. See the [parked-cart guide](docs/parked-carts.md) and [backup/recovery guide](docs/backup.md).
+
+These unmodified desktop and phone captures come from the [passing real-Rust browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39206584813/job/117911033610) at commit `85eb436`. All **37 browser scenarios** passed against Rust and SQLite. The Cedar Market products, labels and amounts are synthetic training fixtures, not customer data or real sales. Browser viewport checks are not physical-phone or native WebView2 certification.
+
+<details>
+<summary>Preview a parked mixed cart before resuming</summary>
+
+The saved cart keeps **3.621 g measured**, **2 packages** and **3 units** distinct. Its current quote is $30.87. Parking and previewing create no sale, cash movement or stock reservation; Resume is a separate action.
+
+![GRAM parked-cart desktop preview showing exact measured grams, package and unit counts with current total 30.87 dollars](docs/screenshots/parked-carts-preview-desktop.png)
+
+![GRAM phone parked-cart preview showing all three original quantities and separate Resume and Discard actions](docs/screenshots/parked-carts-preview-phone.png)
+
+</details>
+
+<details>
+<summary>Review current prices rather than assuming an old price is held</summary>
+
+The tote's current price and name have changed. The preview now quotes $33.12, explains the changes and requires review before Resume. Every original quantity remains unchanged.
+
+![GRAM parked-cart desktop current-price warning with 33.12 dollar quote and unchecked review confirmation](docs/screenshots/parked-cart-price-warning-desktop.png)
+
+![GRAM phone price-change warning showing preserved quantities, current total and disabled Resume until review](docs/screenshots/parked-cart-price-warning-phone.png)
+
+</details>
+
+<details>
+<summary>Keep missing, archived and changed-type products visible</summary>
+
+No invalid line is silently dropped or converted. This cart has no usable total until its issues are resolved; review and resume preserve the original lines, and checkout stays blocked. The long phone warning is vertically scrollable, with review controls below the captured view.
+
+![GRAM desktop parked-cart review showing missing, archived and changed-quantity-type warnings without a checkout quote](docs/screenshots/parked-cart-product-review-desktop.png)
+
+![GRAM phone product-review warnings retaining 3.621 measured grams, two packages and three units](docs/screenshots/parked-cart-product-review-phone.png)
+
+</details>
+
 ## Store identity and local business days (milestone 8)
 
 Version **0.8.0** adds a revision-checked **Store settings** editor with an explicit receipt preview, Save and Cancel. Configure the store display name and optional plain-text header, contact and footer without changing currency or pricing. New receipts retain the saved identity; existing receipt bytes and legacy printing are unchanged. Training warnings cannot be removed.
@@ -240,7 +281,7 @@ Version **0.4.0** adds a training-only cash ledger without rewriting any sale:
 
 Sessions snapshot currency and precision. Close the session before changing currency; refunds must match the active session's currency and precision. Old receipts without a session stay visible as legacy history and are never added to a new drawer's sales. Partial refunds, cash pay-ins/pay-outs, live payment refunds, inventory adjustments, user authentication, taxes, synchronization, and production/fiscal certification are not implemented.
 
-The service explicitly migrates schema 1 stores to schema 2 while leaving their receipt/request bytes intact. The recovery tool accepts older v1 backups as legacy history and new v2 backups with the cash ledger. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
+The service explicitly migrates recognized schema 1/2 stores to schema 3 while leaving their receipt/request bytes intact. The recovery tool accepts older v1/v2 backups and v3 backups containing durable draft identity, parked carts and recovery keys. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
 
 The earlier register/catalog/cash-session screenshots are original milestone-4 browser captures; the receipt/report section is labeled milestone 5. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
 

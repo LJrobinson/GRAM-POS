@@ -637,4 +637,117 @@ mod tests {
         assert_eq!(capability["local"], true);
         assert!(capability.get("remote").is_none());
     }
+
+    #[test]
+    fn parked_cart_lifecycle_uses_bounded_dispatch_and_atomic_checkout() {
+        let service = Arc::new(Mutex::new(RegisterService::in_memory().unwrap()));
+        let initial = dispatch(&service, "initialize_demo", serde_json::json!({})).unwrap();
+        let lines = serde_json::json!([
+            {"id":"native-weight", "sku":"bulk-a", "quantity":{"kind":"measured","grams":"3.501"}},
+            {"id":"native-pack", "sku":"prepack-fixed", "quantity":{"kind":"prepacked","count":"2"}}
+        ]);
+        let saved = dispatch(&service, "save_active_draft", serde_json::json!({
+            "idempotency_key":"native-save", "expected_draft_revision":initial["draft_revision"], "lines":lines
+        })).unwrap();
+        let identity = saved["active_draft"]["id"].clone();
+        assert!(identity.is_string());
+        let park_request = serde_json::json!({
+            "idempotency_key":"native-park", "expected_draft_revision":saved["draft_revision"], "label":"Counter 2"
+        });
+        let parked = dispatch(&service, "park_draft", park_request.clone()).unwrap();
+        assert_eq!(parked["draft"]["lines"], serde_json::json!([]));
+        assert_eq!(parked["parked_drafts"][0]["id"], identity);
+        assert_eq!(
+            dispatch(&service, "park_draft", park_request).unwrap(),
+            parked
+        );
+        let preview = dispatch(
+            &service,
+            "preview_parked_draft",
+            serde_json::json!({"draft_id":identity}),
+        )
+        .unwrap();
+        assert_eq!(preview["lines"], lines);
+        assert!(preview["quote"]["total_minor"].is_string());
+        assert_eq!(
+            dispatch(&service, "list_sales", serde_json::json!({})).unwrap()["sales"],
+            serde_json::json!([])
+        );
+        assert!(
+            dispatch(&service, "get_cash_ledger", serde_json::json!({})).unwrap()["active_session"]
+                .is_null()
+        );
+        let export = generate_export(&service.lock().unwrap(), "backup", None).unwrap();
+        let backup: Value = serde_json::from_str(&export.content).unwrap();
+        assert_eq!(backup["format_version"], 3);
+        assert_eq!(backup["schema_version"], 3);
+        assert!(export.content.contains("Counter 2"));
+        let resumed = dispatch(&service,"resume_parked_draft",serde_json::json!({
+            "idempotency_key":"native-resume", "expected_draft_revision":parked["draft_revision"],
+            "expected_config_revision":preview["config_revision"], "draft_id":identity
+        })).unwrap();
+        assert_eq!(resumed["active_draft"]["id"], identity);
+        assert_eq!(resumed["draft"]["lines"], lines);
+        let session = dispatch(&service,"open_cash_session",serde_json::json!({
+            "idempotency_key":"native-open","opening_float_minor":"0", "expected_currency":preview["currency"]
+        })).unwrap();
+        let checkout = serde_json::json!({
+            "idempotency_key":"native-sale", "lines":lines,
+            "expected_draft_id":identity,"expected_draft_revision":resumed["draft_revision"],
+            "expected_session_id":session["session_id"],"expected_currency":preview["currency"],
+            "expected_config_revision":preview["config_revision"],
+            "expected_total_minor":preview["quote"]["total_minor"], "tender_minor":preview["quote"]["total_minor"]
+        });
+        let receipt = dispatch(&service, "complete_cash_sale", checkout.clone()).unwrap();
+        assert_eq!(
+            dispatch(&service, "complete_cash_sale", checkout.clone()).unwrap(),
+            receipt
+        );
+        let mut duplicate = checkout;
+        duplicate["idempotency_key"] = serde_json::json!("native-second-sale-key");
+        assert!(dispatch(&service, "complete_cash_sale", duplicate).is_err());
+        let after = dispatch(&service, "get_state", serde_json::json!({})).unwrap();
+        assert!(after["active_draft"].is_null());
+        assert_eq!(after["draft"]["lines"], serde_json::json!([]));
+        assert_eq!(after["parked_drafts"], serde_json::json!([]));
+        assert_eq!(
+            dispatch(&service, "list_sales", serde_json::json!({})).unwrap()["sales"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            dispatch(&service, "get_cash_ledger", serde_json::json!({})).unwrap()["active_session"]
+                ["movement_count"],
+            "1"
+        );
+    }
+
+    #[test]
+    fn draft_dispatch_rejects_extra_authority_and_stale_mutations() {
+        let service = Arc::new(Mutex::new(RegisterService::in_memory().unwrap()));
+        let initial = dispatch(&service, "initialize_demo", serde_json::json!({})).unwrap();
+        assert_eq!(dispatch(&service,"save_active_draft",serde_json::json!({
+            "idempotency_key":"native-extra", "expected_draft_revision":initial["draft_revision"],
+            "lines":[], "path":"arbitrary.sqlite3"
+        })).unwrap_err().code,"INVALID_INPUT");
+        let saved = dispatch(&service,"save_active_draft",serde_json::json!({
+            "idempotency_key":"native-current", "expected_draft_revision":initial["draft_revision"],
+            "lines":[{"id":"native-line","sku":"bulk-a","quantity":{"kind":"measured","grams":"3.5"}}]
+        })).unwrap();
+        assert_eq!(dispatch(&service,"save_active_draft",serde_json::json!({
+            "idempotency_key":"native-stale", "expected_draft_revision":initial["draft_revision"], "lines":[]
+        })).unwrap_err().code,"STALE_DRAFT");
+        assert_eq!(
+            dispatch(&service, "get_state", serde_json::json!({})).unwrap(),
+            saved
+        );
+        assert_eq!(
+            dispatch(&service, "save_draft", serde_json::json!({"lines":[]}))
+                .unwrap_err()
+                .code,
+            "GUARDED_DRAFT_REQUIRED"
+        );
+    }
 }

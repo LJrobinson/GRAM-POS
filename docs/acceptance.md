@@ -236,3 +236,16 @@ or external publication is part of these acceptance results.
 - Existing receipt bytes, cash ledger, drafts and v1/v2 backups remain valid; catalog import does not edit pricing groups, stock or tax.
 - Native selection exposes no caller path, uses safe regular-file opening and bounded reads, and grants no general filesystem access.
 - Browser CI captures real invalid/valid desktop/mobile review screens, including before/after values. Local discovery is not browser execution; only promote screenshots after CI passes.
+
+
+## Milestone 9: durable parked carts
+
+- Explicit nonempty Park, optional nonpersonal label, durable local list, current-price preview, safe Resume, and confirmed Discard work on desktop and narrow viewports.
+- Measured milligrams, prepacked count and unit count survive park/resume/restart/backup exactly. Changed, archived, missing or retyped products are visible; no silent line deletion or quantity coercion is allowed.
+- Resume never overwrites an active cart. A fresh preview is required after a configuration change; normal checkout still checks current quote, cash session, currency and tender.
+- Persisted draft identity remains the same through park/resume, and successful checkout consumes it atomically with one sale/receipt/cash movement. Replaying the same key recovers the result; a different checkout key cannot sell an already-consumed identity again.
+- Draft mutations use a global compare-and-swap revision and durable operation journal. Lost responses/restart, stale writes, delayed autosaves and scanner responses cannot duplicate or overwrite a cart. Uncertain actions block conflicting UI operations until reconciled.
+- Guarded mode fences legacy unguarded mutation; existing legacy stores and v1/v2 backup recovery remain supported. No raw historical receipt/request/snapshot bytes are rewritten.
+- Backup v3 is a consistent snapshot including active/parked lifecycle identities and operation records. Malformed identities, revisions and cross-links fail restore without replacing an existing database. Failure in a write transaction leaves the previous complete state intact.
+- Parked carts make no sale, revenue, cash movement or inventory reservation and create no customer record. Sales exports exclude them; full backups include them. No expiry or automatic deletion is introduced.
+- Browser screenshots must come from real CI execution and pass visual review before README publication. See VALIDATION.md for actual test execution and limitations.

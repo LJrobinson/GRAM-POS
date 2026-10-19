@@ -1160,7 +1160,7 @@ version = "0.1.0"
 
 [[package]]
 name = "gram-pos-register"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gram-register-service",
  "libc",

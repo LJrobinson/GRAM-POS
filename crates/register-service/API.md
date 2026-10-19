@@ -242,3 +242,28 @@ The native `select_catalog_csv` picker has no caller path parameter and returns 
 `Config.store_settings` is optional and absent legacy values are omitted when serialized, never filled into an old receipt. When present all five fields are required strings: `display_name` (nonblank, maximum 120 Unicode scalar values), `receipt_header` (500), `receipt_contact` (240), `receipt_footer` (500), and `timezone` (supported exact IANA name). Empty optional text is allowed. Controls, U+2028/U+2029, bidi overrides U+202A–U+202E and isolates U+2066–U+2069 are rejected. Text is single-line and rendered escaped. Mandatory demo/training warnings are not fields.
 
 `put_store_settings` requires an existing register and exact revision, acquires an immediate transaction, modifies only settings on the current configuration and increments revision. It preserves currency, groups, catalog, draft and drawer state. Generic `put_config` and backup recovery apply the same settings validation. A settings write makes existing quotes stale. New receipts snapshot explicitly saved settings; earlier snapshots and embedded backup receipt strings are never rewritten. SQLite/config/backup schema versions remain unchanged. For defaults, preview/cancel, uncertain-response recovery, printing and timezone edge rules see [operator guide](../../docs/store-settings.md).
+
+
+## Durable draft and parked-cart commands (v0.9)
+
+`get_state` retains its existing `draft:{lines}` field and adds a global decimal-string `draft_revision`, `active_draft:{id,revision,issues}` or null, and `parked_drafts:[{id,label,parked_at_unix,line_count}]` summaries. Draft revision is independent of catalog/configuration revision. Clients must not infer prices or inventory from parked summaries.
+
+| Command | Required payload | Result |
+| --- | --- | --- |
+| `save_active_draft` | `idempotency_key`, `expected_draft_revision`, `lines` | Current `State` |
+| `park_draft` | `idempotency_key`, `expected_draft_revision`; optional `label` | Current `State` |
+| `preview_parked_draft` | `draft_id` | Original lines, current config revision/currency, current whole-cart `quote` or null, and line issues |
+| `resume_parked_draft` | `idempotency_key`, `expected_draft_revision`, `expected_config_revision`, `draft_id` | Current `State` |
+| `discard_parked_draft` | `idempotency_key`, `expected_draft_revision`, `draft_id` | Current `State` |
+
+Mutation requests are strict shapes, validated and serialized into a durable operation journal in the same immediate transaction as the transition. An identical key/request retry returns the **current authoritative state**, not an obsolete original response. Changed-payload key reuse fails `IDEMPOTENCY_CONFLICT`; an unmatched revision fails `STALE_DRAFT` without changing state. Read/preview is read-only. A response read can observe a later committed mutation, so clients must use returned current state rather than assuming the original transition's view is still current.
+
+The first nonempty guarded save creates a persistent identity. Updates retain it; parking moves it to the parked collection, and resume returns that same identity to active. Park requires a saved nonempty active cart. Resume requires an empty active cart and the preview's current configuration revision; stale preview must be refreshed. Clearing/discarding retires an identity rather than making it reusable. There is no expiration or replacement/merge behavior.
+
+Preview preserves original line IDs, SKUs and quantity tags/text. It resolves current catalog data and pricing, reporting line issues as `{line_id,code,message,blocking}`. Missing/archived products and incompatible product types block pricing but are not removed. Current-compatible changes may warn without blocking. Only a fully valid whole cart gets a quote, not a misleading partial total. Resume preserves invalid lines for explicit operator correction/removal.
+
+`complete_cash_sale` accepts optional `expected_draft_id` and `expected_draft_revision` fields (omitted legacy fields remain omitted when old requests are serialized). Once a register uses guarded draft mutations these fields are required, and the input must exactly match the persisted active cart. The service validates this ownership inside the checkout transaction and consumes the identity atomically with receipt and cash-ledger writes. Existing checkout-key replay still returns its immutable receipt, including after the draft was consumed; a different key cannot resell that identity. Legacy `save_draft` and unguarded new checkout requests fail `GUARDED_DRAFT_REQUIRED` after guarded mode begins. This prevents an old window from silently replacing the new active cart.
+
+Client mutation recovery keys and pending checkout keys serve different purposes. Persist a pending request before dispatch, block conflicting edits while its outcome is uncertain, and retry exactly the same request. Serialize/flush autosaves before park or checkout; invalidate scanner callbacks immediately when changing cart context. A rejected stale mutation must not be retried with a guessed latest revision and the old cart content.
+
+SQLite schema 3 and logical backup v3 include all durable cart lifecycle/operation data in the same consistent snapshot as original receipt and ledger bytes. Restore supports older v1/v2 backups and validates new metadata and relationships before creating a database. Carts are never counted in sales history/reports or revenue until normal checkout. See [parked carts](../../docs/parked-carts.md) and [backup recovery](../../docs/backup.md).

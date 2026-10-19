@@ -1,9 +1,10 @@
 import { test, expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { fixtureCommand, reloadRegister } from './fixture-command';
 
 // Actual Rust/SQLite commands. Interception only delays real responses to test races.
 const command = async (request: APIRequestContext, name: string, payload: unknown = {}) =>
-  (await request.post('/api/command', { data: { command: name, payload } })).json();
+  fixtureCommand(request, name, payload);
 const api = async (request: APIRequestContext, name: string, payload: unknown = {}) => {
   const result = await command(request, name, payload);
   expect(result.ok, JSON.stringify(result)).toBe(true);
@@ -104,7 +105,7 @@ test('store settings preview and cancel are read-only, save preserves policies a
   await saveSettings(request, { ...branding, display_name: 'Later branding', receipt_footer: 'Later footer', timezone: 'Asia/Tokyo' });
   expect(await api(request, 'get_receipt', { sale_id: legacy.sale_id })).toEqual(legacy);
   expect(await api(request, 'get_receipt', { sale_id: receipt.sale_id })).toEqual(receipt);
-  await page.reload();
+  await reloadRegister(page);
   await page.getByRole('button', { name: 'Sales history', exact: true }).click();
   await page.locator('.sale-row').filter({ hasText: receipt.receipt_number }).click();
   const printed = page.locator('#print-receipt');
@@ -118,7 +119,7 @@ test('store settings preview and cancel are read-only, save preserves policies a
   const ledger = await api(request, 'get_cash_ledger');
   await api(request, 'refund_cash_sale', { idempotency_key: 'settings-branded-refund', sale_id: receipt.sale_id, reason: 'Training return',
     expected_session_id: ledger.active_session.session_id, expected_currency: receipt.quote.currency });
-  await page.reload();
+  await reloadRegister(page);
   await page.getByRole('button', { name: 'Sales history', exact: true }).click();
   await page.locator('.sale-row').filter({ hasText: receipt.receipt_number }).click();
   expect(await printed.innerHTML()).toBe(originalHtml);

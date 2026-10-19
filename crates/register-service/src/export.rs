@@ -74,6 +74,8 @@ struct Backup {
     refunds_sequence: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     legacy_sale_max_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    draft_workflow: Option<drafts::DraftBackup>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,7 +101,10 @@ fn integer(value: &str) -> Result<i64, ServiceError> {
 impl Backup {
     fn validate(&self) -> Result<(), ServiceError> {
         if self.format != "gram-pos-backup"
-            || !matches!((self.format_version, self.schema_version), (1, 1) | (2, 2))
+            || !matches!(
+                (self.format_version, self.schema_version),
+                (1, 1) | (2, 2) | (3, 3)
+            )
         {
             return Err(corrupt());
         }
@@ -164,6 +169,44 @@ impl Backup {
             {
                 return Err(corrupt());
             }
+        }
+        if self.format_version == 3 {
+            let workflow = self.draft_workflow.as_ref().ok_or_else(corrupt)?;
+            let draft = self
+                .draft_json
+                .as_deref()
+                .map(decode_stored::<CartInput>)
+                .transpose()?;
+            let requests = self
+                .sales
+                .iter()
+                .map(|s| {
+                    Ok((
+                        s.id.clone(),
+                        decode_stored::<CheckoutInput>(&s.request_json)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, ServiceError>>()?;
+            let config = self
+                .settings
+                .as_ref()
+                .map(|s| decode_stored::<Config>(&s.config_json))
+                .transpose()?;
+            let revision = self
+                .settings
+                .as_ref()
+                .map(|s| integer(&s.revision))
+                .transpose()?
+                .unwrap_or(0);
+            workflow.validate(draft.as_ref(), &requests, config.as_ref(), revision)?;
+        } else if self.draft_workflow.is_some()
+            || self.sales.iter().any(|s| {
+                decode_stored::<CheckoutInput>(&s.request_json).is_ok_and(|r| {
+                    r.expected_draft_id.is_some() || r.expected_draft_revision.is_some()
+                })
+            })
+        {
+            return Err(corrupt());
         }
         self.validate_ledger()
     }
@@ -549,7 +592,7 @@ impl RegisterService {
         )?;
         let backup = Backup {
             format: "gram-pos-backup".into(),
-            format_version: 2,
+            format_version: 3,
             schema_version: SCHEMA_VERSION,
             settings,
             draft_json,
@@ -562,6 +605,7 @@ impl RegisterService {
             cash_sessions_sequence: Some(ledger_sequence("cash_sessions")?),
             refunds_sequence: Some(ledger_sequence("refunds")?),
             legacy_sale_max_id: Some(legacy.to_string()),
+            draft_workflow: Some(drafts::backup(&tx)?),
         };
         backup.validate()?;
         tx.commit()?;
@@ -740,6 +784,9 @@ impl RegisterService {
             }
             for row in backup.refunds.unwrap_or_default() {
                 tx.execute("INSERT INTO refunds(id,sale_id,session_id,idempotency_key,request_json,receipt_json) VALUES(?1,?2,?3,?4,?5,?6)",params![integer(&row.id)?,integer(&row.sale_id)?,integer(&row.session_id)?,row.idempotency_key,row.request_json,row.receipt_json])?;
+            }
+            if let Some(workflow) = backup.draft_workflow {
+                workflow.restore(&tx)?;
             }
             for (name, sequence) in [
                 (

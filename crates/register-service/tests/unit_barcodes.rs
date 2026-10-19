@@ -205,6 +205,8 @@ fn unit_receipts_drafts_and_barcodes_round_trip_backup_without_repricing() {
         .unwrap();
     let quote = service.quote(&[line("2")]).unwrap();
     let request = CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         expected_session_id: None,
         expected_currency: None,
         idempotency_key: "sale".into(),
@@ -331,6 +333,8 @@ fn unit_refund_and_report_use_saved_amount_after_rename_archive_and_restore() {
     let quote = service.quote(&[line("3")]).unwrap();
     let receipt = service
         .complete_cash_sale(CheckoutInput {
+            expected_draft_id: None,
+            expected_draft_revision: None,
             expected_session_id: None,
             expected_currency: None,
             idempotency_key: "unit-sale-refunded".into(),

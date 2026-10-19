@@ -92,7 +92,7 @@ from today's catalog or re-running checkouts is **not** recovery.
 
 ## Portable format v2 (current export)
 
-Current exports use numeric `format_version: 2`. The `gram-pos-sales` report
+Milestone-4 through milestone-8 exports use numeric `format_version: 2`. The `gram-pos-sales` report
 retains `receipts` and also includes the cash ledger, so gross original receipts
 are never silently presented as net-of-refund sales. It is a report, not a
 recoverable backup.
@@ -129,3 +129,12 @@ Unit-product receipts preserve the `unit` quantity tag and exact count with no i
 ## Version 0.7.0 catalog CSV compatibility
 
 Catalog CSV is not a backup and cannot restore sales or pricing schedules. Import updates only catalog configuration under a revision check; existing receipt snapshots and raw history stay unchanged. SQLite schema 2 and supported portable v1/v2 formats are unchanged, with no migration. Existing backups remain valid. Newly permitted embedded CR/LF product names need 0.7.0 validation, so do not downgrade a store using those names. See [catalog CSV](catalog-csv.md).
+
+
+## Durable carts and backup v3 (0.9.0)
+
+Recognized schema-1/2 databases migrate transactionally to schema 3 on open. Existing sale/request/receipt bytes are unchanged. Current portable backups use format/schema version 3 and include the active draft identity, global draft revision, parked carts and persisted mutation keys in the same consistent snapshot as configuration and the immutable cash ledger. Successful checkout retires the active identity atomically with the receipt, so recovering a parked cart cannot duplicate its sale through a second checkout key.
+
+The restore tool continues to accept valid v1 and v2 backups, including pre-settings golden backups. It does not reinterpret original measured, package or unit quantities against today's catalog. Restored draft lines may be unavailable or incompatible with current products; preview exposes these issues before ordinary checkout. Backups include retained completed/discarded draft lifecycle and operation records; discard is not secure erasure. Backups are unencrypted and now also contain optional cart labels, so labels should contain no customer or other personal information.
+
+Parked carts are deliberately excluded from the separate sales JSON/report exports. Those files are not a substitute for a full backup and cannot restore unfinished carts. Back up before upgrading and do not open a schema-3 store with an older application. Restore into a new file only; do not replace the active database while the register is running. See [parked-cart recovery](parked-carts.md).

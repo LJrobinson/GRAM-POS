@@ -1,3 +1,4 @@
+import type { ActiveDraft, ParkedDraft } from './drafts';
 export type Currency = { code: string; minor_unit_exponent: number };
 export type Quantity = { kind: 'measured'; grams: string } | { kind: 'prepacked'; count: string } | { kind: 'unit'; count: string };
 export type CartLine = { id: string; sku: string; quantity: Quantity };
@@ -5,10 +6,10 @@ export type CatalogItem = { archived?: boolean; barcode?: string | null; sku: st
 export type GroupConfig = { id: string; name: string; tiers: { nominal_grams: string; tolerance_grams: string; price_minor: string }[]; overage_policy: 'full_actual_at_tier_rate' | 'excess_beyond_tolerance_at_tier_rate'; rounding: 'floor' | 'ceil' | 'half_up' | 'half_even'; below_smallest: 'proportional_at_smallest_tier' | 'reject'; tolerance_scope: 'aggregate_pricing_group' };
 export type StoreSettings = { display_name: string; receipt_header: string; receipt_contact: string; receipt_footer: string; timezone: string };
 export type Config = { store_settings?: StoreSettings; schema_version: 1; demo: true; tax_mode: 'demo_no_tax'; currency: Currency; groups: GroupConfig[]; catalog: CatalogItem[] };
-export type RegisterState = { configured: boolean; config_revision: string; config: Config | null; catalog: CatalogItem[]; draft: { lines: CartLine[] } };
+export type RegisterState = { configured: boolean; config_revision: string; config: Config | null; catalog: CatalogItem[]; draft: { lines: CartLine[] }; draft_revision: string; active_draft: ActiveDraft | null; parked_drafts: ParkedDraft[] };
 export type PricedLine = CartLine & { name: string; declared_content_grams: string | null; amount_minor: string; explanation: Record<string, unknown> };
 export type PricedGroup = { group_id: string; actual_measured_grams: string; declared_package_grams: string; eligible_grams: string; selected_nominal_grams: string; tolerance_grams: string; billable_grams: string; rule: string; amount_minor: string; exact_numerator: string; exact_denominator: string; schedule: GroupConfig };
 export type Quote = { config_revision: string; currency: Currency; lines: PricedLine[]; groups: PricedGroup[]; total_minor: string; tax_mode: 'demo_no_tax' };
 export type Receipt = { config_snapshot?: { store_settings?: StoreSettings }; sale_id: string; receipt_number: string; created_at_unix: string; quote: Quote; tender_minor: string; change_minor: string; payment_method: 'cash'; demo: true };
 export type SaleSummary = { sale_id: string; receipt_number: string; created_at_unix: string; total_minor: string; tender_minor: string; change_minor: string; currency: Currency; line_count: number };
-export type CheckoutPayload = { idempotency_key: string; lines: CartLine[]; tender_minor: string; expected_total_minor: string; expected_config_revision: string; expected_session_id?: string; expected_currency?: Currency };
+export type CheckoutPayload = { idempotency_key: string; lines: CartLine[]; tender_minor: string; expected_total_minor: string; expected_config_revision: string; expected_session_id?: string; expected_currency?: Currency; expected_draft_id?: string; expected_draft_revision?: string };

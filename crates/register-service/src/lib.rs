@@ -5,6 +5,7 @@
 
 mod catalog_csv;
 pub use catalog_csv::{CatalogCsvIssue, CatalogCsvPreview, CatalogCsvRow, MAX_CATALOG_CSV_BYTES};
+mod drafts;
 mod dto;
 mod export;
 mod report;
@@ -22,7 +23,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const APPLICATION_ID: i64 = 0x4752414D;
 const MAX_LINES: usize = 500;
 
@@ -48,7 +49,7 @@ impl std::error::Error for ServiceError {}
 impl From<rusqlite::Error> for ServiceError {
     fn from(_: rusqlite::Error) -> Self {
         // Do not expose local paths or SQL through frontend responses.
-        Self::new("STORAGE_ERROR", "Local storage failed. Retry the same checkout key to reconcile any uncertain completion.")
+        Self::new("STORAGE_ERROR", "Local storage failed. Retry the exact same request and operation or checkout key to reconcile any uncertain completion.")
     }
 }
 impl From<core::PricingError> for ServiceError {
@@ -160,6 +161,18 @@ impl RegisterService {
                 transaction.execute_batch(&format!("CREATE TRIGGER {table}_no_update BEFORE UPDATE ON {table} BEGIN SELECT RAISE(ABORT, 'Ledger is immutable'); END; CREATE TRIGGER {table}_no_delete BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'Ledger is immutable'); END;"))?;
             }
         }
+        if version < 3 {
+            transaction.execute_batch(
+                "CREATE TABLE draft_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL CHECK(revision>=0), next_id INTEGER NOT NULL CHECK(next_id>0), guarded INTEGER NOT NULL CHECK(guarded IN (0,1)), active_id TEXT REFERENCES draft_records(id), guarded_since_revision INTEGER CHECK(guarded_since_revision>0 AND guarded_since_revision<=revision), CHECK((guarded=1)=(guarded_since_revision IS NOT NULL)));
+                 CREATE TABLE draft_records (id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','parked','consumed','discarded')), data_json TEXT NOT NULL, sale_id INTEGER UNIQUE REFERENCES sales(id), CHECK((status='consumed')=(sale_id IS NOT NULL)));
+                 CREATE UNIQUE INDEX one_active_draft ON draft_records(status) WHERE status='active';
+                 CREATE TABLE draft_operations (idempotency_key TEXT PRIMARY KEY, command TEXT NOT NULL, request_json TEXT NOT NULL, applied_revision INTEGER NOT NULL UNIQUE CHECK(applied_revision>0));
+                 CREATE TRIGGER draft_operations_no_update BEFORE UPDATE ON draft_operations BEGIN SELECT RAISE(ABORT, 'Cart operations are immutable'); END;
+                 CREATE TRIGGER draft_operations_no_delete BEFORE DELETE ON draft_operations BEGIN SELECT RAISE(ABORT, 'Cart operations are immutable'); END;
+                 INSERT INTO draft_metadata VALUES(1,0,1,0,NULL,NULL);
+                 PRAGMA user_version = 3;"
+            )?;
+        }
         // Read required columns before accepting the file; corrupted/missing schema fails closed.
         transaction.prepare("SELECT s.revision, s.config_json, d.draft_json FROM settings s LEFT JOIN drafts d ON d.singleton=s.singleton")?;
         transaction.prepare("SELECT s.id, s.idempotency_key, s.request_json, s.created_at_unix, s.snapshot_json, r.receipt_json FROM sales s LEFT JOIN receipts r ON s.id=r.sale_id")?;
@@ -170,6 +183,13 @@ impl RegisterService {
         transaction.prepare("SELECT sale_id,session_id FROM sale_sessions")?;
         transaction.prepare(
             "SELECT id,sale_id,session_id,idempotency_key,request_json,receipt_json FROM refunds",
+        )?;
+        transaction.prepare(
+            "SELECT revision,next_id,guarded,active_id,guarded_since_revision FROM draft_metadata WHERE singleton=1",
+        )?;
+        transaction.prepare("SELECT id,status,data_json,sale_id FROM draft_records")?;
+        transaction.prepare(
+            "SELECT idempotency_key,command,request_json,applied_revision FROM draft_operations",
         )?;
         transaction.commit()?;
         Ok(Self { conn })
@@ -265,6 +285,31 @@ impl RegisterService {
                 let input: CheckoutInput = decode(payload)?;
                 encode(self.complete_cash_sale(input)?)
             }
+            "save_active_draft" => {
+                let input = decode(payload)?;
+                encode(self.save_active_draft(input)?)
+            }
+            "park_draft" => {
+                let input = decode(payload)?;
+                encode(self.park_draft(input)?)
+            }
+            "resume_parked_draft" => {
+                let input = decode(payload)?;
+                encode(self.resume_parked_draft(input)?)
+            }
+            "discard_parked_draft" => {
+                let input = decode(payload)?;
+                encode(self.discard_parked_draft(input)?)
+            }
+            "preview_parked_draft" => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct PreviewInput {
+                    draft_id: String,
+                }
+                let input: PreviewInput = decode(payload)?;
+                encode(self.preview_parked_draft(&input.draft_id)?)
+            }
             "save_draft" => {
                 let input: CartInput = decode(payload)?;
                 self.save_draft(input)?;
@@ -306,6 +351,8 @@ impl RegisterService {
         let (revision, config) = stored
             .map(|(r, c)| (r.to_string(), Some(c)))
             .unwrap_or(("0".into(), None));
+        let (draft_revision, active_draft, parked_drafts) =
+            drafts::state_fields(&tx, config.as_ref(), revision.parse().unwrap_or(0))?;
         let result = State {
             configured: config.is_some(),
             config_revision: revision,
@@ -315,6 +362,9 @@ impl RegisterService {
                 .unwrap_or_default(),
             config,
             draft,
+            draft_revision,
+            active_draft,
+            parked_drafts,
         };
         tx.commit()?;
         Ok(result)
@@ -458,7 +508,11 @@ impl RegisterService {
     pub fn save_draft(&mut self, draft: CartInput) -> Result<(), ServiceError> {
         // A draft may be incomplete (e.g. blank weight while typing), but its shape and IDs must be safe.
         validate_draft(&draft.lines)?;
-        self.conn.execute("INSERT INTO drafts(singleton,draft_json) VALUES(1,?1) ON CONFLICT(singleton) DO UPDATE SET draft_json=excluded.draft_json", [serialize(&draft)?])?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        drafts::save_legacy(&tx, &draft)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -477,6 +531,7 @@ impl RegisterService {
             }
             return decode_stored(&receipt);
         }
+        drafts::check_checkout(&tx, &input)?;
         let session = active_session(&tx)?.ok_or_else(|| {
             ServiceError::new(
                 "NO_OPEN_SESSION",
@@ -547,6 +602,7 @@ impl RegisterService {
             "INSERT INTO sale_sessions VALUES(?1,?2)",
             params![id, session.session_id],
         )?;
+        drafts::consume_checkout(&tx, id)?;
         // Clearing the recovered cart is part of the same commit as the receipt.
         tx.execute("DELETE FROM drafts WHERE singleton=1", [])?;
         tx.commit()?;

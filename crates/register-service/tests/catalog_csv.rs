@@ -267,6 +267,8 @@ fn import_preserves_saved_sale_receipt_draft_and_active_cash_session() {
     let q = s.quote(&lines).unwrap();
     let receipt = s
         .complete_cash_sale(CheckoutInput {
+            expected_draft_id: None,
+            expected_draft_revision: None,
             expected_session_id: None,
             expected_currency: None,
             idempotency_key: "sale".into(),

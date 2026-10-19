@@ -1,3 +1,47 @@
+# Milestone 9 validation
+
+Implemented from merged main `b80f472199dcc103a0fcaa4d58b45a45afe2c957` on 2026-10-19. Before editing, all **125 tracked local blobs**, including binary assets, matched the remote Git tree. App version is 0.9.0; SQLite schema 3 and portable backup v3 add durable active/parked identities and mutation recovery records while accepting older v1/v2 backups. Pricing/config schemas and immutable historical receipt bytes are unchanged.
+
+## Scope
+
+Explicit Park/list/preview/resume/confirmed discard, optional nonpersonal labels, exact original quantity types/text, current-price/catalog warnings, active-cart overwrite prevention, revision-checked serialized saves, idempotent recovery across lost responses/restart, and atomic one-time consumption with ordinary cash checkout. No inventory reservation, customer records, live payment, sync, taxes, compliance or license choice is added. Parked carts do not count as completed sales or cash activity.
+
+## Local verification
+
+- `cargo test --workspace --all-targets --all-features --locked`: **154 tests passed**, comprising the 132 prior tests plus 22 parked-draft regressions.
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` and `cargo fmt --all -- --check`: passed.
+- Workspace doctests (no cases) and the pricing-demo example: passed.
+- Native host formatting and locked no-dependency Cargo metadata: passed. Two new dispatcher scenarios also passed in an extracted portable Rust harness against the real service, without Tauri system dependencies. This does **not** count as native Tauri runtime or WebView2 execution.
+- Frontend typecheck, **103 pure tests** (69 prior plus 34 draft/writer regressions, including the CI corrections below), and production build: passed.
+- Strict standalone TypeScript checking of the new browser specifications and guarded-fixture helper: passed.
+- The original golden pre-settings backup and receipt fixtures are byte-identical. Their whole-file backup regression explicitly changes only the versioned envelope/new empty workflow section; historical stored JSON bytes are still checked exactly.
+
+## Independent review and CI corrections
+
+Separate read-only review covered transactions, cross-window state, frontend journals and backup consistency. Fixes address legacy nonempty draft identity initialization, recovery error-code mismatches and checkout-first boot recovery, storage-write failures retaining unsent local work, per-line invalid-quantity warnings, canonical guard revisions, ordinary queued scans vs autosave, and cross-window recovery-key overwrite/removal. Backup validation replays ordered guarded events and verifies coverage from an explicit guarded-start revision, including the first empty save. Immediate pre-removal journal checks protect conflict adoption after awaited reads.
+
+Initial browser CI at `331eb535` found a real frontend integration defect missed by the pure fixtures and initial review: Rust JSON object-key order differs from locally constructed JavaScript objects. Stringified cart comparison wrongly treated a successful save as a competing-window change. Cart equality now compares each typed field and exact quantity text, retaining array order, IDs, SKUs and quantity kinds. Exact recovery-journal byte comparisons are unchanged. A new regression failed before the correction and passed afterward; independent verification also replayed the actual failed-CI request/response bytes through both controller versions.
+
+Recovery remains visible until its retry is acknowledged, and Add is disabled while another cart save is in flight. Browser fixture helpers now assert the real HTTP 400 domain-error contract rather than requiring HTTP 200 for intentionally rejected commands. Recovery tests await the successful response and cleared journal before asserting the same two requests, identical payloads and unchanged revision. No retry-count, quantity, duplicate-sale or overwrite assertion was removed. Final read-only review reported no remaining blocking finding; it independently passed all 103 frontend tests and typecheck.
+
+## Verified published browser evidence
+
+For source head **`85eb436b8359ebc6d3fbc129d0d74a0679ed78d5`**, both the [PR browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39206584813/job/117911033610) and [push browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39206581046/job/117910945749) passed **37 of 37 scenarios**. The PR job checked out merge `48aac34` against unchanged base `b80f472`; the push job tested the source head directly. The suite includes 15 parked-cart scenarios and an exact-Windows-origin Chromium capability probe, alongside the 21 prior scenarios.
+
+Original PR artifact **12166281568**, `gram-pos-register-browser-review`, has ZIP SHA-256 **`9e047d5cc06472e146747ea19a83e00e5a94a4634837dbfb55e8b162be1d7730`**. It was downloaded, matched to that source head, hash-verified and inspected. Six original PNGs were copied byte-for-byte into `docs/screenshots/`: desktop/phone pairs for `parked-carts-preview`, `parked-cart-price-warning` and `parked-cart-product-review`. No generated image, crop, resize or pixel edit was substituted.
+
+Visual checks confirm separate **3.621 g measured**, **2 packages** and **3 units**, a $30.87 current quote, a changed-price $33.12 quote with review gate, and missing/archived/changed-type warnings without a usable total. Desktop captures are 1440×1000 and phone captures are 390×844. All fit horizontally. Long warning content is vertically scrollable; the product-review phone capture prioritizes the warnings, with confirmation/actions below the captured view. Cedar Market data is synthetic training content, not customer details or business revenue.
+
+The earlier milestone-9 Windows [PR package job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39204868276/job/117905844623) and [push package job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39204854316/job/117905820261), at `331eb535`, passed **12 native dispatcher tests**, native clippy and unsigned NSIS packaging with offline WebView2. Their `--show-output` logs contain no reparse-point test skip. Those results do not establish success for a later head. At screenshot preparation time, Windows tests/packaging for `85eb436` were still running; the final PR-head checks must be verified separately after this documentation update.
+
+## WebView origin and evidence boundary
+
+The Windows Tauri origin and `useHttpsScheme` setting are unchanged, preserving existing localStorage checkout keys. Same-origin draft and checkout journals use one Web Lock and fail closed when the capability is unavailable; there is no fake localStorage-lock fallback. Official origin documentation and upstream secure-context confirmation are linked in [native-host notes](apps/register/src-tauri/README.md). The passing Chromium probe explicitly verifies `http://tauri.localhost` is a secure context with available Web Locks and serializes two pages, but is **not** packaged Tauri/WebView2 runtime certification.
+
+Local Chromium/socket and GTK/GObject limitations remain; no denied escalation was repeated. Runtime browser evidence above comes from GitHub CI against Rust/SQLite, not mocked screenshots. Browser success and unsigned packaging do not prove physical phone/tablet support, native OS-dialog usability, scanner timing, printers/scales, production payments/tax/compliance or independent security certification. Earlier README captures retain their original milestone labels.
+
+---
+
 # Milestone 6 validation
 
 Implemented from merged main `d9792d757a9118534581ea0ed1979235bbe6d3bc` on 2026-10-19. All 85 tracked local blobs, including binary screenshots, were verified against the recursive remote Git tree before edits; no divergent files were overwritten. App version is 0.6.0. SQLite schema 2, configuration schema 1 and accepted portable backup formats are unchanged.

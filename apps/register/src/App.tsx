@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { command, RegisterError } from './api';
+import { DraftWorkspace, sameLines } from './drafts';
+import { CHECKOUT_PENDING_KEY, withRegisterWriter, writeCheckoutJournal, clearCheckoutJournal } from './registerWriter';
+import { ParkedCarts, DraftRecovery, ParkCartForm, DraftWarnings } from './ParkedCarts';
 import { BarcodeScanner } from './BarcodeScanner';
 import { StoreSettingsEditor } from './StoreSettingsEditor';
 import { SalesReportPanel } from './SalesReport';
@@ -14,8 +17,8 @@ import { CatalogImport } from './CatalogImport';
 import { dateTime, minorToInput, money, parseTender, quantityLabel, ruleNames, validCount, validGrams } from './format';
 import type { CartLine, CatalogItem, CheckoutPayload, Config, GroupConfig, Quote, Receipt, RegisterState, SaleSummary } from './types';
 
-const PENDING_KEY = 'gram.checkout.pending.v1';
-const knownUncommitted = new Set(['INVALID_INPUT', 'INVALID_CONFIG', 'NOT_CONFIGURED', 'INSUFFICIENT_TENDER', 'STALE_QUOTE', 'PRICE_ERROR', 'ARCHIVED_PRODUCT', 'NO_OPEN_SESSION', 'SESSION_CHANGED', 'SESSION_CURRENCY', 'SESSION_CLOSED']);
+const PENDING_KEY = CHECKOUT_PENDING_KEY;
+const knownUncommitted = new Set(['INVALID_INPUT', 'INVALID_CONFIG', 'NOT_CONFIGURED', 'INSUFFICIENT_TENDER', 'STALE_QUOTE', 'PRICE_ERROR', 'ARCHIVED_PRODUCT', 'NO_OPEN_SESSION', 'SESSION_CHANGED', 'SESSION_CURRENCY', 'SESSION_CLOSED', 'STALE_DRAFT', 'GUARDED_DRAFT_REQUIRED']);
 function readPending(): CheckoutPayload | null { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
 function errorText(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong. Please try again.'; }
 function emptyCart() { return <div className="empty-cart"><div className="empty-symbol"><Icon name="bag" size={29}/></div><h3>A fresh start.</h3><p>Choose a product to begin.<br/>Every gram, accounted for.</p></div>; }
@@ -42,7 +45,16 @@ function Modal({ title, subtitle, children, onClose, wide = false, className = '
 }
 
 export default function App() {
-  const [state, setState] = useState<RegisterState | null>(null);
+  const workspaceRef = useRef<DraftWorkspace | null>(null);
+  if (!workspaceRef.current) workspaceRef.current = new DraftWorkspace(command, localStorage, () => crypto.randomUUID(), withRegisterWriter);
+  const workspace = workspaceRef.current;
+  const draftView = useSyncExternalStore(workspace.subscribe, workspace.snapshot);
+  const state = draftView.state;
+  const lines = draftView.lines;
+  const [workflow, setWorkflow] = useState<'park' | 'list' | null>(null);
+  const workflowRef = useRef<'park' | 'list' | null>(null);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [workflowError, setWorkflowError] = useState('');
   const [booting, setBooting] = useState(true);
   const [bootError, setBootError] = useState('');
   const [page, setCurrentPage] = useState<'register' | 'history' | 'settings' | 'cash' | 'reports'>('register');
@@ -56,13 +68,13 @@ export default function App() {
   const reportReceiptRequest = useRef(0);
   const pageRef = useRef(page);
   const scannerResetToken = useRef(0);
-  const setPage = (next: typeof page) => { if (settingsBusy && next !== page) return; if (next !== page && settingsDirty && !window.confirm('Discard unsaved configuration changes and leave Configuration?')) return; if (next !== page) { scannerResetToken.current += 1; setSettingsDirty(false); reportReceiptRequest.current += 1; } pageRef.current = next; setCurrentPage(next); };
-  useEffect(() => { const warn = (event: BeforeUnloadEvent) => { if (settingsDirty) { event.preventDefault(); event.returnValue = ''; } }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [settingsDirty]);
-  const [lines, setLines] = useState<CartLine[]>([]);
+  const scannerPendingRef = useRef(0);
+  const [scannerPending, setScannerPending] = useState(0);
+  const setPage = (next: typeof page) => { if (workspace.blocked || workflowRef.current || checkoutInFlight.current) return; if (settingsBusy && next !== page) return; if (next !== page && settingsDirty && !window.confirm('Discard unsaved configuration changes and leave Configuration?')) return; if (next !== page) { scannerResetToken.current += 1; setSettingsDirty(false); reportReceiptRequest.current += 1; } pageRef.current = next; setCurrentPage(next); };
+  useEffect(() => { const warn = (event: BeforeUnloadEvent) => { if (settingsDirty || workspace.dirty || workspace.blocked) { event.preventDefault(); event.returnValue = ''; } }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, [settingsDirty]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [pricing, setPricing] = useState(false);
   const [quoteError, setQuoteError] = useState('');
-  const [draftError, setDraftError] = useState('');
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<CatalogItem | null>(null);
@@ -71,21 +83,22 @@ export default function App() {
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [demoLoading, setDemoLoading] = useState(false);
   const [notice, setNotice] = useState('');
-  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const checkoutInFlight = useRef(false);
   const loadState = async () => {
     setBooting(true); setBootError('');
     try {
       const next = await command<RegisterState>('get_state');
-      setState(next);
+      workspace.initialize(next);
       if (next.configured) await refreshLedger();
       const pending = readPending();
       if (pending) {
-        const result = await command<{ receipt: Receipt | null }>('get_sale_by_key', { idempotency_key: pending.idempotency_key });
-        if (result.receipt) { localStorage.removeItem(PENDING_KEY); setAttempt(null); setReceipt(result.receipt); setLines(next.draft.lines); }
-        else { setAttempt(pending); setLines(pending.lines); setCheckout(true); }
-      } else setLines(next.draft.lines);
+        await withRegisterWriter(async () => {
+          const result = await command<{ receipt: Receipt | null }>('get_sale_by_key', { idempotency_key: pending.idempotency_key });
+          if (result.receipt) { const current = await command<RegisterState>('get_state'); clearCheckoutJournal(localStorage, pending); workspace.initialize(current); setAttempt(null); setReceipt(result.receipt); }
+          else { setAttempt(pending); setCheckout(true); }
+        });
+      }
     } catch (error) { setBootError(errorText(error)); }
     finally { setBooting(false); }
   };
@@ -100,45 +113,80 @@ export default function App() {
     return () => { live = false; };
   }, [lines, state?.config_revision, booting]);
   useEffect(() => {
-    if (booting || !state?.configured || attempt) return;
-    let live = true;
-    const timer = setTimeout(() => {
-      draftTimer.current = null;
-      saveQueue.current = saveQueue.current.catch(() => {}).then(() => command('save_draft', { lines })).then(() => { if (live) setDraftError(''); }).catch(error => { if (live) setDraftError(`Draft not saved: ${errorText(error)}`); });
-    }, 300);
+    if (booting || !state?.configured || attempt || workspace.blocked || workflow || scannerPending > 0) return;
+    const timer = setTimeout(() => { draftTimer.current = null; if (scannerPendingRef.current === 0) void workspace.flush().catch(() => {}); }, 300);
     draftTimer.current = timer;
-    return () => { live = false; clearTimeout(timer); if (draftTimer.current === timer) draftTimer.current = null; };
-  }, [lines, booting, state?.configured, attempt]);
-  const changeCart = (next: CartLine[]) => { if (attempt) return; setQuote(null); setLines(next); };
+    return () => { clearTimeout(timer); if (draftTimer.current === timer) draftTimer.current = null; };
+  }, [lines, booting, state?.configured, attempt, draftView.busy, workflow, scannerPending]);
+  const cartLocked = !!attempt || workspace.blocked || !!workflow || checkoutInFlight.current;
+  const changeCart = (next: CartLine[]) => {
+    if (attempt || workspace.blocked || workflowRef.current || checkoutInFlight.current) return;
+    if (workspace.change(next)) setQuote(null);
+  };
   const addProduct = (product: CatalogItem, value: string) => {
-    if (attempt) return;
+    if (attempt || workspace.blocked || workflowRef.current || checkoutInFlight.current) return;
     const line: CartLine = { id: crypto.randomUUID(), sku: product.sku, quantity: product.kind === 'measured' ? { kind: 'measured', grams: value } : { kind: product.kind, count: value } };
-    setQuote(null); setLines(current => [...current, line]);
+    changeCart([...workspace.view.lines, line]);
     setSelected(null);
+  };
+  const closeWorkflow = () => { if (workflowBusy || workspace.blocked) return; workflowRef.current = null; setWorkflow(null); setWorkflowError(''); };
+  const openWorkflow = (next: 'park' | 'list') => {
+    if (attempt || workspace.blocked || checkoutInFlight.current || workflowRef.current) return;
+    scannerResetToken.current += 1;
+    if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+    workflowRef.current = next; setWorkflow(next); setWorkflowError('');
+  };
+  const parkCart = async (label: string) => {
+    if (workflowBusy || workspace.blocked) return;
+    setWorkflowBusy(true); setWorkflowError('');
+    try {
+      await workspace.mutate({ command: 'park_draft', label: label.trim() || null });
+      workflowRef.current = null; setWorkflow(null); setQuote(null); setNotice('Cart parked. Start a fresh sale whenever you’re ready.');
+    } catch (error) { setWorkflowError(errorText(error)); }
+    finally { setWorkflowBusy(false); }
   };
   const initialize = async (currency?: Config['currency']) => {
     setDemoLoading(true); setNotice('');
-    try { const next = await command<RegisterState>(currency ? 'initialize_empty' : 'initialize_demo', currency ? { currency } : {}); setState(next); await refreshLedger(); setLines(next.draft.lines); if (currency) setPage('settings'); }
+    try { const next = await command<RegisterState>(currency ? 'initialize_empty' : 'initialize_demo', currency ? { currency } : {}); workspace.initialize(next); await refreshLedger(); if (currency) setPage('settings'); }
     catch (error) { setNotice(errorText(error)); }
     finally { setDemoLoading(false); }
   };
   const finishSale = async (tender: string) => {
-    if (checkoutInFlight.current) return;
+    if (checkoutInFlight.current || (!attempt && (workspace.blocked || workflowRef.current))) return;
     if (!attempt && (!ledger?.active_session || ledgerAttempt)) throw new Error('Open a cash session and resolve pending cash actions first.');
     if (!quote && !attempt) throw new Error('Wait for a current quote before checkout.');
     checkoutInFlight.current = true;
+    scannerResetToken.current += 1;
     if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
     try {
-      const payload: CheckoutPayload = attempt || { idempotency_key: crypto.randomUUID(), lines, tender_minor: tender, expected_total_minor: quote!.total_minor, expected_config_revision: quote!.config_revision, expected_session_id: ledger!.active_session!.session_id, expected_currency: quote!.currency };
-      localStorage.setItem(PENDING_KEY, JSON.stringify(payload));
-      setAttempt(payload);
-      await saveQueue.current.catch(() => {});
-      const paid = await command<Receipt>('complete_cash_sale', payload);
-      setReceipt(paid); setCheckout(false); setLines([]); setQuote(null);
-      localStorage.removeItem(PENDING_KEY); setAttempt(null); await refreshLedger();
+      if (!attempt) await workspace.flush();
+      const active = workspace.view.state?.active_draft;
+      if (!attempt && !active) throw new Error('Save the active cart before checkout.');
+      const payload: CheckoutPayload = attempt || { idempotency_key: crypto.randomUUID(), lines: workspace.view.lines, tender_minor: tender, expected_total_minor: quote!.total_minor, expected_config_revision: quote!.config_revision, expected_session_id: ledger!.active_session!.session_id, expected_currency: quote!.currency, expected_draft_id: active!.id, expected_draft_revision: workspace.view.state!.draft_revision };
+      await withRegisterWriter(async () => {
+        writeCheckoutJournal(localStorage, payload, !!attempt);
+        setAttempt(payload);
+        const paid = await command<Receipt>('complete_cash_sale', payload);
+        // A sale may have committed even if the refresh fails. Keep its exact checkout key until both are known.
+        const current = await command<RegisterState>('get_state');
+        clearCheckoutJournal(localStorage, payload);
+        if (workspace.view.pending) workspace.initialize(current); else workspace.replaceAfterCheckout(current);
+        setReceipt(paid); setCheckout(false); setQuote(null); setAttempt(null);
+      });
+      await refreshLedger();
     } finally { checkoutInFlight.current = false; }
   };
-  const reviseAttempt = () => { localStorage.removeItem(PENDING_KEY); setAttempt(null); setCheckout(false); setQuote(null); setLines(current => [...current]); };
+  const reviseAttempt = async () => {
+    if (!attempt) return;
+    await withRegisterWriter(async () => {
+      const current = await command<RegisterState>('get_state');
+      if (!sameLines(current.draft.lines, attempt.lines) && !window.confirm('The saved active cart differs from this failed checkout. Return to the current saved cart without overwriting it? The old checkout lines will not be copied into it.')) return;
+      // Failed stale checkouts return to authoritative work, never replaying old checkout lines.
+      clearCheckoutJournal(localStorage, attempt);
+      if (workspace.view.pending) workspace.initialize(current); else workspace.replaceAfterCheckout(current);
+      setAttempt(null); setCheckout(false); setQuote(null);
+    });
+  };
   const catalog = activeCatalog(state?.catalog || []);
   const visible = catalog.filter(item => (filter === 'all' || item.kind === filter) && `${item.name} ${item.sku}`.toLowerCase().includes(query.toLowerCase()));
   const currency = state?.config?.currency;
@@ -151,30 +199,35 @@ export default function App() {
     </aside>
     <main className="main-content">
       <header className="topbar"><div className="breadcrumb">WORKSPACE <span>/</span> {page === 'register' ? 'REGISTER' : page === 'history' ? 'SALES HISTORY' : page === 'cash' ? 'CASH SESSIONS' : page === 'reports' ? 'REPORTS' : 'CONFIGURATION'}</div><div className="topbar-right"><span className="training-badge"><span/>TRAINING MODE</span><span className="today">{new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span></div></header>
-      {booting ? <div className="full-state"><div className="loading-wheel"/><h2>Opening your register</h2><p>Connecting to your local workspace…</p></div> : bootError ? <div className="full-state"><Icon name="info" size={40}/><h2>Let’s reconnect.</h2><p>{bootError}</p><button className="primary" onClick={() => void loadState()}><Icon name="refresh"/>Try again</button><small>Browser development needs the local Rust service on port 4174.</small></div> : !state?.configured ? <Welcome loading={demoLoading} error={notice} onInitialize={() => void initialize()} onBlank={currency => void initialize(currency)}/> : page === 'history' ? <History onReceipt={saved => { setLedger(null); setReceipt(saved); void refreshLedger(); }} ledger={ledger}/> : page === 'cash' ? <LedgerPanel ledger={ledger} error={ledgerError} onRefresh={() => void refreshLedger()} onAction={setLedgerAction} currency={currency!} blocked={!!attempt || !!ledgerAttempt}/> : page === 'reports' ? <SalesReportPanel defaultTimezone={state.config?.store_settings?.timezone ?? 'UTC'} configRevision={state.config_revision} onExport={exportSalesReport} onOpenReceipt={async (saleId, isCurrent) => { const request = ++reportReceiptRequest.current; const saved = await command<Receipt>('get_receipt', { sale_id: saleId }); if (request !== reportReceiptRequest.current || pageRef.current !== 'reports' || (isCurrent && !isCurrent())) return; await refreshLedger(); if (request === reportReceiptRequest.current && pageRef.current === 'reports' && (!isCurrent || isCurrent())) setReceipt(saved); }}/> : page === 'settings' ? <Settings onBusyChange={setSettingsBusy} onDirtyChange={setSettingsDirty} revision={state.config_revision} config={state.config!} hasCart={lines.length > 0 || !!attempt} onSave={next => { setState(next); setNotice('Saved configuration loaded. New quotes use these rules.'); }}/> : <div className="register-layout">
+      {booting ? <div className="full-state"><div className="loading-wheel"/><h2>Opening your register</h2><p>Connecting to your local workspace…</p></div> : bootError ? <div className="full-state"><Icon name="info" size={40}/><h2>Let’s reconnect.</h2><p>{bootError}</p><button className="primary" onClick={() => void loadState()}><Icon name="refresh"/>Try again</button><small>Browser development needs the local Rust service on port 4174.</small></div> : !state?.configured ? <Welcome loading={demoLoading} error={notice} onInitialize={() => void initialize()} onBlank={currency => void initialize(currency)}/> : page === 'history' ? <History onReceipt={saved => { setLedger(null); setReceipt(saved); void refreshLedger(); }} ledger={ledger}/> : page === 'cash' ? <LedgerPanel ledger={ledger} error={ledgerError} onRefresh={() => void refreshLedger()} onAction={setLedgerAction} currency={currency!} blocked={!!attempt || !!ledgerAttempt}/> : page === 'reports' ? <SalesReportPanel defaultTimezone={state.config?.store_settings?.timezone ?? 'UTC'} configRevision={state.config_revision} onExport={exportSalesReport} onOpenReceipt={async (saleId, isCurrent) => { const request = ++reportReceiptRequest.current; const saved = await command<Receipt>('get_receipt', { sale_id: saleId }); if (request !== reportReceiptRequest.current || pageRef.current !== 'reports' || (isCurrent && !isCurrent())) return; await refreshLedger(); if (request === reportReceiptRequest.current && pageRef.current === 'reports' && (!isCurrent || isCurrent())) setReceipt(saved); }}/> : page === 'settings' ? <Settings onBusyChange={setSettingsBusy} onDirtyChange={setSettingsDirty} revision={state.config_revision} config={state.config!} hasCart={lines.length > 0 || !!attempt} onSave={next => { workspace.refresh(next); setNotice('Saved configuration loaded. New quotes use these rules.'); }}/> : <div className="register-layout">
         <section className="catalog-area">
           <div className="page-heading"><div><span className="eyebrow">A LITTLE PRECISION. A LOT OF POSSIBILITY.</span><h1>Let’s ring it up<span className="emerald">.</span></h1><p>Measured by weight. Priced with confidence.</p></div><span className="catalog-count">{catalog.length} products</span></div>
           <div className="drawer-status"><span>{ledger?.active_session ? `Cash session open · ${money(ledger.active_session.expected_cash_minor, ledger.active_session.currency)} expected` : ledgerError ? 'Cash session unavailable' : 'Open a cash session before checkout'}</span><button className="secondary" onClick={() => setPage('cash')}>Manage cash</button></div><div className="search-field"><Icon name="search"/><input aria-label="Search products" placeholder="Search products or SKU…" value={query} onChange={event => setQuery(event.target.value)}/>{query && <button className="icon-button compact" aria-label="Clear search" onClick={() => setQuery('')}><Icon name="close" size={16}/></button>}<span className="search-hint">CATALOG</span></div>
-          <BarcodeScanner resetToken={scannerResetToken} enabled={!attempt && !selected && !checkout && !receipt && !ledgerAction && !ledgerAttempt} revision={state.config_revision} onProduct={product => { if (product.kind === 'measured') { setSelected(product); return false; } addProduct(product, '1'); return true; }}/>
+          <BarcodeScanner onPendingChange={count => { scannerPendingRef.current = count; setScannerPending(count); }} resetToken={scannerResetToken} enabled={!cartLocked && !selected && !checkout && !receipt && !ledgerAction && !ledgerAttempt} revision={state.config_revision} onProduct={product => { if (workflowRef.current || workspace.blocked || checkoutInFlight.current) return false; if (product.kind === 'measured') { setSelected(product); return false; } addProduct(product, '1'); return true; }}/>
           <div className="filter-row" role="group" aria-label="Product category"><button className={filter === 'all' ? 'filter active' : 'filter'} onClick={() => setFilter('all')}>All products <span>{catalog.length}</span></button><button className={filter === 'measured' ? 'filter active' : 'filter'} onClick={() => setFilter('measured')}>Deli / by weight</button><button className={filter === 'prepacked' ? 'filter active' : 'filter'} onClick={() => setFilter('prepacked')}>Prepacked</button><button className={filter === 'unit' ? 'filter active' : 'filter'} onClick={() => setFilter('unit')}>Units / each</button></div>
-          {visible.length ? <div className="product-grid">{visible.map((product, index) => <ProductCard key={product.sku} product={product} index={index} config={state.config!} disabled={!!attempt} onClick={() => { scannerResetToken.current += 1; setSelected(product); }}/>)}</div> : <div className="no-results"><Icon name="search" size={32}/><h3>No products found</h3><p>{catalog.length ? 'Try a different name or clear your filters.' : 'Add or unarchive products in Configuration to begin.'}</p><button className="secondary" onClick={() => { setQuery(''); setFilter('all'); }}>Clear filters</button></div>}
+          {visible.length ? <div className="product-grid">{visible.map((product, index) => <ProductCard key={product.sku} product={product} index={index} config={state.config!} disabled={cartLocked} onClick={() => { if (workspace.blocked || workflowRef.current || checkoutInFlight.current) return; scannerResetToken.current += 1; setSelected(product); }}/>)}</div> : <div className="no-results"><Icon name="search" size={32}/><h3>No products found</h3><p>{catalog.length ? 'Try a different name or clear your filters.' : 'Add or unarchive products in Configuration to begin.'}</p><button className="secondary" onClick={() => { setQuery(''); setFilter('all'); }}>Clear filters</button></div>}
           <div className="precision-note"><div className="precision-icon"><Icon name="scale" size={22}/></div><div><strong>Different products. One thoughtful price.</strong><p>Eligible products share a weight tier while keeping their own sale lines.</p></div><span>EXACT BY DESIGN</span></div>
           <div className="compliance-note"><Icon name="info" size={16}/><span>Training only. Taxes, compliance and inventory tracking are not configured. Do not use for live sales.</span></div>
         </section>
         <aside className="cart-panel" aria-label="Current sale">
-          <div className="cart-heading"><div><span className="eyebrow">CURRENT SALE</span><h2>Your cart <span>{lines.length}</span></h2></div><button className="text-button" disabled={!lines.length || !!attempt} onClick={() => { scannerResetToken.current += 1; changeCart([]); }}>Clear</button></div>
-          <div className="cart-items">{!lines.length ? emptyCart() : lines.map(line => { const item = catalog.find(item => item.sku === line.sku); const priced = quote?.lines.find(item => item.id === line.id); return <div className="cart-line" key={line.id}><div className={`line-icon ${line.quantity.kind}`}><Icon name={line.quantity.kind === 'measured' ? 'jar' : 'box'} size={20}/></div><div className="line-details"><strong>{item?.name || line.sku}</strong><span>{quantityLabel(line.quantity, item?.declared_content_grams)}</span><small>{item?.pricing.kind === 'weight_group' ? 'Shared weight pricing' : item?.kind === 'unit' ? 'Fixed unit price' : 'Fixed package price'}</small></div><div className="line-end"><strong>{priced ? money(priced.amount_minor, currency) : '—'}</strong><button className="remove-line" disabled={!!attempt} aria-label={`Remove ${item?.name || line.sku}`} onClick={() => changeCart(lines.filter(item => item.id !== line.id))}>Remove</button></div></div>; })}
+          <div className="cart-heading"><div><span className="eyebrow">CURRENT SALE</span><h2>Your cart <span>{lines.length}</span></h2></div><button className="text-button" disabled={!lines.length || cartLocked} onClick={() => { scannerResetToken.current += 1; if (window.confirm('Clear this active cart? All its lines will be removed. This does not delete other parked carts.')) changeCart([]); }}>Clear</button></div>
+          <div className="cart-draft-actions"><button className="secondary" disabled={!lines.length || cartLocked} onClick={() => openWorkflow('park')}><Icon name="bag" size={16}/>Park cart</button><button className="secondary" disabled={cartLocked} onClick={() => openWorkflow('list')}>Parked carts<span className="draft-count">{state.parked_drafts.length}</span></button></div>
+          {state.active_draft && <DraftWarnings issues={state.active_draft.issues}/>}
+          <div className="cart-items">{!lines.length ? emptyCart() : lines.map(line => { const item = state.catalog.find(item => item.sku === line.sku); const priced = quote?.lines.find(item => item.id === line.id); return <div className="cart-line" key={line.id}><div className={`line-icon ${line.quantity.kind}`}><Icon name={line.quantity.kind === 'measured' ? 'jar' : 'box'} size={20}/></div><div className="line-details"><strong>{item?.name || line.sku}</strong><span>{quantityLabel(line.quantity, item?.declared_content_grams)}</span><small>{!item ? 'Product unavailable · saved quantity retained' : item.kind !== line.quantity.kind ? 'Product type changed · saved quantity retained' : item.pricing.kind === 'weight_group' ? 'Shared weight pricing' : item.kind === 'unit' ? 'Fixed unit price' : 'Fixed package price'}</small></div><div className="line-end"><strong>{priced ? money(priced.amount_minor, currency) : '—'}</strong><button className="remove-line" disabled={cartLocked} aria-label={`Remove ${item?.name || line.sku}`} onClick={() => changeCart(lines.filter(item => item.id !== line.id))}>Remove</button></div></div>; })}
             {quote && quote.groups.length > 0 && <div className="group-breakdown"><div className="breakdown-title"><Icon name="scale" size={16}/><span>YOUR WEIGHT PRICING</span></div>{quote.groups.map(group => <details key={group.group_id}><summary><div><strong>{group.schedule.name || group.group_id}</strong><span>{group.eligible_grams} g eligible · {group.selected_nominal_grams} g tier</span></div><span>{money(group.amount_minor, quote.currency)}<Icon name="chevron" size={14}/></span></summary><dl><div><dt>Actual measured</dt><dd>{group.actual_measured_grams} g</dd></div><div><dt>Declared pack content</dt><dd>{group.declared_package_grams} g</dd></div><div><dt>Tier tolerance</dt><dd>+{group.tolerance_grams} g</dd></div><div><dt>Billable weight</dt><dd>{group.billable_grams} g</dd></div></dl><p>{ruleNames[group.rule] || group.rule}</p></details>)}</div>}
           </div>
-          <div className="cart-summary">{quoteError && <div className="error-banner" role="alert">{quoteError}</div>}{draftError && <div className="error-banner" role="alert">{draftError}</div>}{attempt && <div className="warning-banner">A checkout needs to be resolved. Retry it safely before editing this cart.</div>}<div className="summary-row"><span>Subtotal</span><strong>{quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><div className="summary-row muted"><span>Tax</span><span className="tax-label">Not configured · demo</span></div><div className="total-row"><span>Total</span><strong aria-live="polite">{pricing ? <span className="calculating">Pricing…</span> : quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><button className="checkout-button" disabled={!!ledgerAttempt || (!attempt && (!quote || pricing || !!quoteError || !ledger?.active_session || !sameCurrency(ledger.active_session.currency, currency!)))} onClick={() => { scannerResetToken.current += 1; setCheckout(true); }}><Icon name="cash"/><span>{attempt ? 'Resume checkout' : 'Charge cash'}</span>{quote && <strong>{money(quote.total_minor, currency)}</strong>}<Icon name="arrow" size={18}/></button><div className="checkout-footnote"><Icon name="shield" size={13}/><span>Exact pricing. Saved locally.</span></div></div>
+          <div className="cart-summary">{quoteError && <div className="error-banner" role="alert">{quoteError}</div>}{draftView.busy && <p className="draft-saving" role="status">Saving cart safely…</p>}{draftView.error && <div className="error-banner" role="alert">{draftView.error}</div>}{attempt && <div className="warning-banner">A checkout needs to be resolved. Retry it safely before editing this cart.</div>}<div className="summary-row"><span>Subtotal</span><strong>{quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><div className="summary-row muted"><span>Tax</span><span className="tax-label">Not configured · demo</span></div><div className="total-row"><span>Total</span><strong aria-live="polite">{pricing ? <span className="calculating">Pricing…</span> : quote ? money(quote.total_minor, currency) : lines.length ? '—' : money('0', currency)}</strong></div><button className="checkout-button" disabled={workspace.blocked || !!workflow || !!ledgerAttempt || (!attempt && (!quote || pricing || !!quoteError || !ledger?.active_session || !sameCurrency(ledger.active_session.currency, currency!)))} onClick={() => { scannerResetToken.current += 1; setCheckout(true); }}><Icon name="cash"/><span>{attempt ? 'Resume checkout' : 'Charge cash'}</span>{quote && <strong>{money(quote.total_minor, currency)}</strong>}<Icon name="arrow" size={18}/></button><div className="checkout-footnote"><Icon name="shield" size={13}/><span>Exact pricing. Saved locally.</span></div></div>
         </aside>
       </div>}
-      {notice && state?.configured && page !== 'register' && <div className="toast" role="status">{notice}<button className="icon-button compact" aria-label="Dismiss notification" onClick={() => setNotice('')}><Icon name="close" size={16}/></button></div>}
+      {notice && state?.configured && <div className="toast" role="status">{notice}<button className="icon-button compact" aria-label="Dismiss notification" onClick={() => setNotice('')}><Icon name="close" size={16}/></button></div>}
     </main>
     {(ledgerAction || ledgerAttempt) && <Modal title={ledgerAttempt ? 'Recover cash action' : ledgerAction?.kind === 'refund' ? 'Full receipt refund' : ledgerAction?.kind === 'close' ? 'Close cash session' : 'Open cash session'}><LedgerForm action={ledgerAction} pending={ledgerAttempt} onPending={setLedgerAttempt} onCancel={() => { setLedgerAction(null); void refreshLedger(); }} onDone={message => { setLedgerAction(null); setNotice(message); setPage('cash'); void refreshLedger(); }}/></Modal>}
-    {selected && <ProductModal product={selected} config={state!.config!} onClose={() => setSelected(null)} onAdd={value => addProduct(selected, value)}/>}
-    {checkout && (quote || attempt) && <CashCheckout total={attempt?.expected_total_minor || quote!.total_minor} currency={attempt?.expected_currency || currency!} attempt={attempt} onClose={() => setCheckout(false)} onSubmit={finishSale} onRevise={reviseAttempt}/>}
-    {receipt && <ReceiptModal key={receipt.sale_id} receipt={receipt} ledger={ledger} blocked={!!attempt || !!ledgerAttempt} onRefund={() => { if (ledger?.active_session) { setLedgerAction({ kind: 'refund', receipt, session: ledger.active_session }); setReceipt(null); } }} onClose={() => setReceipt(null)}/>}
+    {workflow === 'park' && !draftView.error && <Modal title="Park this cart" subtitle="Keep this sale for later and make room for the next one." onClose={!workflowBusy && !draftView.busy ? closeWorkflow : undefined}><ParkCartForm busy={workflowBusy || draftView.busy} error={workflowError} onSubmit={parkCart}/></Modal>}
+    {workflow === 'list' && !draftView.error && <Modal title="Parked carts" subtitle="Saved on this device. Nothing is charged or reserved." onClose={!workflowBusy && !draftView.busy ? closeWorkflow : undefined} wide><ParkedCarts workspace={workspace} activeLines={lines} onBusy={setWorkflowBusy} onDone={message => { workflowRef.current = null; setWorkflow(null); setQuote(null); setNotice(message); }}/></Modal>}
+    {draftView.error && !attempt && <Modal title="Recover saved cart action" subtitle="Your cart is locked so an uncertain action cannot lose or duplicate its lines." wide><DraftRecovery workspace={workspace} view={draftView} onDone={() => { workflowRef.current = null; setWorkflow(null); setWorkflowError(''); setQuote(null); }}/></Modal>}
+    {selected && !draftView.error && <ProductModal blocked={cartLocked} product={selected} config={state!.config!} onClose={() => setSelected(null)} onAdd={value => addProduct(selected, value)}/>}
+    {checkout && (!draftView.error || attempt) && (quote || attempt) && <CashCheckout total={attempt?.expected_total_minor || quote!.total_minor} currency={attempt?.expected_currency || currency!} attempt={attempt} onClose={() => setCheckout(false)} onSubmit={finishSale} onRevise={reviseAttempt}/>}
+    {receipt && !draftView.error && <ReceiptModal key={receipt.sale_id} receipt={receipt} ledger={ledger} blocked={!!attempt || !!ledgerAttempt} onRefund={() => { if (ledger?.active_session) { setLedgerAction({ kind: 'refund', receipt, session: ledger.active_session }); setReceipt(null); } }} onClose={() => setReceipt(null)}/>}
   </div>;
 }
 
@@ -187,15 +240,15 @@ function ProductCard({ product, config, index, disabled, onClick }: { product: C
   return <button className={`product-card tone-${index % 4}`} disabled={disabled} onClick={onClick}><div className="product-card-top"><span className="product-type">{product.kind === 'measured' ? 'DELI / BY WEIGHT' : product.kind === 'unit' ? 'UNIT / EACH' : 'PREPACKED'}</span><span className="product-add"><Icon name="plus" size={18}/></span></div><div className="product-emblem"><Icon name={product.kind === 'measured' ? 'jar' : 'box'} size={42}/><span>{product.kind === 'measured' ? 'NET WT.' : product.kind === 'unit' ? 'EACH' : `${product.declared_content_grams} g`}</span></div><div className="product-card-body"><h3>{product.name}</h3><p>{product.kind === 'measured' ? 'Enter measured grams' : product.kind === 'unit' ? 'Sold by whole-item count' : `${product.declared_content_grams} g declared per pack`}</p><div className="product-card-bottom"><span className={`pricing-tag ${group ? '' : 'fixed'}`}>{group ? group.name : 'Fixed price'}</span><strong>{product.pricing.kind === 'fixed_unit' ? money(product.pricing.unit_price_minor, config.currency) : 'Tiered'}<Icon name="chevron" size={14}/></strong></div></div></button>;
 }
 
-function ProductModal({ product, config, onClose, onAdd }: { product: CatalogItem; config: Config; onClose: () => void; onAdd: (value: string) => void }) {
+function ProductModal({ product, config, onClose, onAdd, blocked }: { blocked: boolean; product: CatalogItem; config: Config; onClose: () => void; onAdd: (value: string) => void }) {
   const [value, setValue] = useState(product.kind === 'measured' ? '' : '1');
   const measured = product.kind === 'measured';
   const valid = measured ? validGrams(value) : validCount(value);
   const group = product.pricing.kind === 'weight_group' ? config.groups.find(group => group.id === (product.pricing as { group_id: string }).group_id) : null;
-  return <Modal title={product.name} subtitle={measured ? 'Record the actual net weight from your scale.' : product.kind === 'unit' ? 'Sold by count. No weight is assigned to this item.' : `${product.declared_content_grams} g declared content per package. This is not a scale measurement.`} onClose={onClose}><form onSubmit={event => { event.preventDefault(); if (valid) onAdd(value); }}><label className="field-label" htmlFor="quantity">{measured ? 'Measured weight' : product.kind === 'unit' ? 'Number of units' : 'Number of packages'}</label><div className="quantity-input"><input id="quantity" autoFocus inputMode={measured ? 'decimal' : 'numeric'} placeholder={measured ? '0.000' : '1'} value={value} onChange={event => setValue(event.target.value)} autoComplete="off"/><span>{measured ? 'grams' : product.kind === 'unit' ? 'units' : 'packs'}</span></div><p className="input-help">{measured ? 'Up to 3 decimal places. Your exact entry is preserved on the sale.' : product.kind === 'unit' ? 'Whole units only, starting at 1.' : 'Whole packages only. Declared content is kept separate from measured weight.'}</p>{group && <div className="tier-preview"><span className="eyebrow">{group.name} · SHARED WEIGHT TIERS</span><div>{group.tiers.map(tier => <span key={tier.nominal_grams}><strong>{tier.nominal_grams} g</strong>{money(tier.price_minor, config.currency)}<small>+{tier.tolerance_grams} g tolerance</small></span>)}</div><p>Final cart pricing is calculated by the exact Rust pricing engine.</p></div>}{product.pricing.kind === 'fixed_unit' && <div className="fixed-price-note">{product.kind === 'unit' ? 'Fixed unit price' : 'Fixed package price'} <strong>{money(product.pricing.unit_price_minor, config.currency)}</strong></div>}{value && !valid && <p className="field-error">{measured ? 'Enter a positive weight with no more than 3 decimal places.' : `Enter a whole number of ${product.kind === 'unit' ? 'units' : 'packages'}, starting at 1.`}</p>}<button className="primary full-width" type="submit" disabled={!valid}>Add to cart<Icon name="plus"/></button></form></Modal>;
+  return <Modal title={product.name} subtitle={measured ? 'Record the actual net weight from your scale.' : product.kind === 'unit' ? 'Sold by count. No weight is assigned to this item.' : `${product.declared_content_grams} g declared content per package. This is not a scale measurement.`} onClose={onClose}><form onSubmit={event => { event.preventDefault(); if (valid && !blocked) onAdd(value); }}><label className="field-label" htmlFor="quantity">{measured ? 'Measured weight' : product.kind === 'unit' ? 'Number of units' : 'Number of packages'}</label><div className="quantity-input"><input id="quantity" autoFocus inputMode={measured ? 'decimal' : 'numeric'} placeholder={measured ? '0.000' : '1'} value={value} onChange={event => setValue(event.target.value)} autoComplete="off"/><span>{measured ? 'grams' : product.kind === 'unit' ? 'units' : 'packs'}</span></div><p className="input-help">{measured ? 'Up to 3 decimal places. Your exact entry is preserved on the sale.' : product.kind === 'unit' ? 'Whole units only, starting at 1.' : 'Whole packages only. Declared content is kept separate from measured weight.'}</p>{group && <div className="tier-preview"><span className="eyebrow">{group.name} · SHARED WEIGHT TIERS</span><div>{group.tiers.map(tier => <span key={tier.nominal_grams}><strong>{tier.nominal_grams} g</strong>{money(tier.price_minor, config.currency)}<small>+{tier.tolerance_grams} g tolerance</small></span>)}</div><p>Final cart pricing is calculated by the exact Rust pricing engine.</p></div>}{product.pricing.kind === 'fixed_unit' && <div className="fixed-price-note">{product.kind === 'unit' ? 'Fixed unit price' : 'Fixed package price'} <strong>{money(product.pricing.unit_price_minor, config.currency)}</strong></div>}{value && !valid && <p className="field-error">{measured ? 'Enter a positive weight with no more than 3 decimal places.' : `Enter a whole number of ${product.kind === 'unit' ? 'units' : 'packages'}, starting at 1.`}</p>}<button className="primary full-width" type="submit" disabled={!valid || blocked}>Add to cart<Icon name="plus"/></button></form></Modal>;
 }
 
-function CashCheckout({ total, currency, attempt, onClose, onSubmit, onRevise }: { total: string; currency: Config['currency']; attempt: CheckoutPayload | null; onClose: () => void; onSubmit: (minor: string) => Promise<void>; onRevise: () => void }) {
+function CashCheckout({ total, currency, attempt, onClose, onSubmit, onRevise }: { total: string; currency: Config['currency']; attempt: CheckoutPayload | null; onClose: () => void; onSubmit: (minor: string) => Promise<void>; onRevise: () => Promise<void> }) {
   const [value, setValue] = useState(attempt ? minorToInput(attempt.tender_minor, currency.minor_unit_exponent) : '');
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState('');
@@ -204,7 +257,7 @@ function CashCheckout({ total, currency, attempt, onClose, onSubmit, onRevise }:
   const minor = parseTender(value, currency.minor_unit_exponent);
   const valid = minor !== null && BigInt(minor) >= BigInt(total);
   const submit = async () => { if (busy || legacyPending || (!valid && !attempt)) return; setBusy(true); setIssue(''); try { await onSubmit(attempt?.tender_minor || minor!); } catch (error) { setIssue(errorText(error)); setCanRevise(error instanceof RegisterError && knownUncommitted.has(error.code)); } finally { setBusy(false); } };
-  return <Modal title="Cash checkout" subtitle="Training sale · no live payment is collected" onClose={!busy && !attempt ? onClose : undefined}><div className="checkout-total"><span>Amount due</span><strong>{money(total, currency)}</strong><small>Tax not configured · demo only</small></div><label className="field-label" htmlFor="cash-received">Cash received ({currency.code})</label><div className="quantity-input cash-input"><span>{currency.code === 'USD' ? '$' : currency.code}</span><input id="cash-received" autoFocus inputMode="decimal" value={value} placeholder="0.00" disabled={busy || !!attempt} onChange={event => setValue(event.target.value)}/></div><div className="cash-shortcuts"><button className="secondary" disabled={busy || !!attempt} onClick={() => setValue(minorToInput(total, currency.minor_unit_exponent))}>Exact amount</button>{['20', '50', '100'].map(amount => <button key={amount} className="secondary" disabled={busy || !!attempt || BigInt(amount) * 10n ** BigInt(currency.minor_unit_exponent) < BigInt(total)} onClick={() => setValue(amount)}>{currency.code === 'USD' ? '$' : currency.code + ' '}{amount}</button>)}</div>{minor && !valid && <p className="field-error">Cash received must cover the amount due.</p>}{value && !minor && <p className="field-error">Enter a valid amount with up to {currency.minor_unit_exponent} decimal places.</p>}{issue && <div className="error-banner" role="alert">{issue}</div>}{legacyPending && <div className="warning-banner">This older checkout was not committed and has no drawer snapshot. Return to the cart, open a cash session, and review a new checkout.</div>}{attempt && !busy && !legacyPending && <div className="warning-banner">{canRevise ? 'This attempt did not save a sale. You can revise it safely.' : 'This checkout is protected against duplicate sales. Retrying uses the same payment details and checkout key.'}</div>}<button className="primary full-width" disabled={busy || legacyPending || (!attempt && !valid)} onClick={() => void submit()}><Icon name={busy ? 'lock' : 'check'}/>{busy ? 'Saving sale…' : attempt ? 'Retry same checkout' : 'Complete cash sale'}</button>{canRevise && <button className="secondary full-width revise" onClick={onRevise}>Return to cart and revise</button>}<p className="checkout-explainer"><Icon name="shield" size={16}/>A receipt appears only after your sale is saved. Change is calculated by the register service.</p></Modal>;
+  return <Modal title="Cash checkout" subtitle="Training sale · no live payment is collected" onClose={!busy && !attempt ? onClose : undefined}><div className="checkout-total"><span>Amount due</span><strong>{money(total, currency)}</strong><small>Tax not configured · demo only</small></div><label className="field-label" htmlFor="cash-received">Cash received ({currency.code})</label><div className="quantity-input cash-input"><span>{currency.code === 'USD' ? '$' : currency.code}</span><input id="cash-received" autoFocus inputMode="decimal" value={value} placeholder="0.00" disabled={busy || !!attempt} onChange={event => setValue(event.target.value)}/></div><div className="cash-shortcuts"><button className="secondary" disabled={busy || !!attempt} onClick={() => setValue(minorToInput(total, currency.minor_unit_exponent))}>Exact amount</button>{['20', '50', '100'].map(amount => <button key={amount} className="secondary" disabled={busy || !!attempt || BigInt(amount) * 10n ** BigInt(currency.minor_unit_exponent) < BigInt(total)} onClick={() => setValue(amount)}>{currency.code === 'USD' ? '$' : currency.code + ' '}{amount}</button>)}</div>{minor && !valid && <p className="field-error">Cash received must cover the amount due.</p>}{value && !minor && <p className="field-error">Enter a valid amount with up to {currency.minor_unit_exponent} decimal places.</p>}{issue && <div className="error-banner" role="alert">{issue}</div>}{legacyPending && <div className="warning-banner">This older checkout was not committed and has no drawer snapshot. Return to the cart, open a cash session, and review a new checkout.</div>}{attempt && !busy && !legacyPending && <div className="warning-banner">{canRevise ? 'This attempt did not save a sale. You can revise it safely.' : 'This checkout is protected against duplicate sales. Retrying uses the same payment details and checkout key.'}</div>}<button className="primary full-width" disabled={busy || legacyPending || (!attempt && !valid)} onClick={() => void submit()}><Icon name={busy ? 'lock' : 'check'}/>{busy ? 'Saving sale…' : attempt ? 'Retry same checkout' : 'Complete cash sale'}</button>{canRevise && <button className="secondary full-width revise" disabled={busy} onClick={() => { setBusy(true); void onRevise().catch(error => setIssue(errorText(error))).finally(() => setBusy(false)); }}>Return to cart and revise</button>}<p className="checkout-explainer"><Icon name="shield" size={16}/>A receipt appears only after your sale is saved. Change is calculated by the register service.</p></Modal>;
 }
 
 function History({ onReceipt, ledger }: { onReceipt: (receipt: Receipt) => void; ledger: CashLedger | null }) {

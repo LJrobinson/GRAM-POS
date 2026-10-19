@@ -116,6 +116,10 @@ pub struct CartInput {
 #[serde(deny_unknown_fields)]
 pub struct CheckoutInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_draft_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_draft_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_currency: Option<CurrencyDto>,
@@ -216,6 +220,9 @@ pub struct State {
     pub config: Option<Config>,
     pub catalog: Vec<CatalogItem>,
     pub draft: CartInput,
+    pub draft_revision: String,
+    pub active_draft: Option<ActiveDraft>,
+    pub parked_drafts: Vec<ParkedDraftSummary>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -365,4 +372,71 @@ pub struct SalesReportEvent {
     /// Legacy sales have no session. Refunds always have their own session.
     pub session_id: Option<String>,
     pub reason: Option<String>,
+}
+
+/// A global revision fences every cart transition, including successful checkout.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActiveDraft {
+    pub id: String,
+    pub revision: String,
+    pub issues: Vec<DraftIssue>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParkedDraftSummary {
+    pub id: String,
+    pub label: Option<String>,
+    pub parked_at_unix: String,
+    pub line_count: usize,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DraftIssue {
+    /// Empty only for an issue affecting the complete pooled-price quote.
+    pub line_id: String,
+    pub code: String,
+    pub message: String,
+    pub blocking: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParkedDraftPreview {
+    pub draft_id: String,
+    pub label: Option<String>,
+    pub lines: Vec<CartInputLine>,
+    pub config_revision: String,
+    pub currency: CurrencyDto,
+    pub quote: Option<Quote>,
+    pub issues: Vec<DraftIssue>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveActiveDraftInput {
+    pub idempotency_key: String,
+    pub expected_draft_revision: String,
+    pub lines: Vec<CartInputLine>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParkDraftInput {
+    pub idempotency_key: String,
+    pub expected_draft_revision: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResumeParkedDraftInput {
+    pub idempotency_key: String,
+    pub expected_draft_revision: String,
+    pub draft_id: String,
+    pub expected_config_revision: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscardParkedDraftInput {
+    pub idempotency_key: String,
+    pub expected_draft_revision: String,
+    pub draft_id: String,
 }
