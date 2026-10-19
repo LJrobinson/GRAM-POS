@@ -1,6 +1,6 @@
 # Printable receipts and sales reports
 
-Version 0.5.0 adds read-only reporting and printing to the training register. It adds no tax engine, fiscal certification, inventory adjustments, live payments, or synchronization.
+Version 0.5.0 introduced read-only reporting and printing; 0.8.0 adds saved receipt identity and explicit IANA report timezones. It adds no tax engine, fiscal certification, inventory adjustments, live payments, or synchronization.
 
 ## Print an original receipt
 
@@ -10,9 +10,9 @@ Every product name, line quantity, declared package weight, pricing-group calcul
 
 Printing follows the [official Tauri printing guidance](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewWindow.html#method.print). Browser PDF/CSS validation is not physical-printer or native-device certification. Windows WebView2/system-dialog and physical-printer behavior require device testing; receipt paper sizes and printer margins remain user-selected.
 
-## Reports: UTC event dates, not drawer balances
+## Reports: selected-zone event dates, not drawer balances
 
-Open **Reports** and choose a UTC range. The start date at 00:00 UTC is included. The end date at 00:00 UTC is excluded. To report October 18, select start `2026-10-18` and end `2026-10-19`. This initial version supports UTC only, not the register's local calendar day. Dates use strict Gregorian `YYYY-MM-DD` syntax, including leap-year validation.
+Open **Reports** and choose a timezone and date range. The start date at local midnight is included; end midnight is excluded. To report October 18, select start `2026-10-18` and end `2026-10-19`. Rust resolves both boundaries using IANA rules and returns UTC seconds, including DST and historical offsets. UTC remains the default for old date-only API calls. Dates use strict Gregorian `YYYY-MM-DD` syntax, including leap-year validation. Ambiguous/nonexistent midnights are rejected, not silently shifted. See [store settings](store-settings.md).
 
 - Gross sales include saved sales whose original sale event timestamp falls in the range.
 - Refunds include saved refund events whose own timestamp falls in the range, even when the original sale is outside the range.
@@ -25,7 +25,7 @@ Reports use one consistent, validated snapshot of stored records and retain exac
 
 ## CSV is a report, not a backup
 
-**Export report CSV** creates a fresh server-generated snapshot for the selected range. It may include activity saved since the on-screen report was generated. The fixed `gram-pos-sales-report.csv` UTF-8 file contains a header, separate `summary` rows per currency/precision, and `event` rows for sales and refunds. Empty ranges produce the header only. Never add summary and event rows together. Gross/refund/net columns belong to summary rows; event amount and kind belong to event rows. Amount columns are integer minor units, with `minor_unit_exponent` indicating the decimal precision.
+**Export report CSV** creates a fresh server-generated snapshot for the loaded range, timezone and configuration revision; changed settings reject the export. It may include activity saved since the on-screen report was generated. The fixed `gram-pos-sales-report.csv` UTF-8 file contains a header, separate `summary` rows per currency/precision, and `event` rows for sales and refunds. Empty explicit-zone/revision ranges include one metadata row identifying the zone and UTC bounds; legacy date-only requests remain header-only. Never add summary and event rows together. Gross/refund/net columns belong to summary rows; event amount and kind belong to event rows. Amount columns are integer minor units, with `minor_unit_exponent` indicating the decimal precision.
 
 Fields are quoted and embedded quotes/newlines escaped. Potential spreadsheet formula prefixes in user-authored refund reasons are neutralized with an apostrophe. This defense applies to CSV only; saved reasons are unchanged. CSV retains full exact digits, but spreadsheets may auto-round long numbers or reinterpret dates. Import identifiers and exact minor-unit columns as **text** when preserving large values matters. Unicode is preserved.
 

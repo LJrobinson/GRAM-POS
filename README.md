@@ -4,6 +4,14 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Store identity and local business days (milestone 8)
+
+Version **0.8.0** adds a revision-checked **Store settings** editor with an explicit receipt preview, Save and Cancel. Configure the store display name and optional plain-text header, contact and footer without changing currency or pricing. New receipts retain the saved identity; existing receipt bytes and legacy printing are unchanged. Training warnings cannot be removed.
+
+Reports now accept an explicit IANA timezone, defaulting to UTC for compatibility. The register offers the saved store timezone, but each report can select another zone. Rust resolves inclusive/exclusive local calendar midnights using IANA rules, including 23-hour and 25-hour daylight-saving days, and returns exact UTC boundaries. CSV exports identify the zone, bounds, revision and event offsets; stale settings prevent exporting an outdated selection. See [store settings and timezone guide](docs/store-settings.md) and [receipt/report semantics](docs/receipts-and-reports.md).
+
+New browser scenarios capture the actual settings preview, branded receipt and local-timezone report at desktop and phone widths. Those milestone-8 captures are pending the real-browser CI run; no generated mockup is presented as evidence. Existing verified screenshots below remain labeled by milestone.
+
 ## Bulk catalog CSV (milestone 7)
 
 Version 0.7.0 adds local, versioned catalog CSV export/templates and a read-only import preview before explicit atomic Apply. SKU is the stable upsert identity; missing products are never deleted. Errors identify rows, duplicate active/archived barcodes, missing price groups, and invalid exact amounts. Revision checks prevent overwriting newer edits. Spreadsheet-safe `text:` encoding is reversible, including leading-zero barcodes and legitimate apostrophes. See the [operator guide and complete CSV format](docs/catalog-csv.md).

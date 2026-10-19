@@ -53,3 +53,8 @@
 .csv-product-review dd { margin:4px 0 0; white-space:pre-wrap; font-size:14px; }
 .csv-format-help { margin:16px 0; }
 .csv-format-help summary { min-height:44px; padding:12px 0; cursor:pointer; }
+
+.store-preview { margin-top: 20px; padding: 24px; background: #fffdf5; border: 1px dashed #ccd8d0; border-radius: 12px; overflow-wrap: anywhere; }
+.store-preview > strong:first-child { font-size: 24px; }
+.settings-card .editor-grid small { color: #697b74; font-size: 11px; }
+.receipt-custom { text-align: center; overflow-wrap: anywhere; }

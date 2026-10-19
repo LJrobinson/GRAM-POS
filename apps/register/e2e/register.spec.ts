@@ -499,7 +499,7 @@ test.describe('Printable receipts and sales reports', () => {
     expect(await page.evaluate(() => (window as Window & { reportDownloadTypes?: string[] }).reportDownloadTypes)).toEqual(['text/csv;charset=utf-8']);
     expect(csv).toContain(`"'${refundReason.replaceAll('"', '""')}"`);
     const records = parseReportCsv(csv);
-    const expectedHeader = ['record_type', 'start_date', 'end_date', 'timezone', 'currency_code', 'minor_unit_exponent', 'gross_sales_minor', 'refunds_minor', 'net_sales_minor', 'sale_count', 'refund_count', 'event_kind', 'event_id', 'sale_id', 'created_at_unix', 'total_minor', 'session_id', 'reason'];
+    const expectedHeader = ['record_type', 'start_date', 'end_date', 'timezone', 'start_at_unix', 'end_at_unix', 'config_revision', 'created_at_local', 'utc_offset_seconds', 'currency_code', 'minor_unit_exponent', 'gross_sales_minor', 'refunds_minor', 'net_sales_minor', 'sale_count', 'refund_count', 'event_kind', 'event_id', 'sale_id', 'created_at_unix', 'total_minor', 'session_id', 'reason'];
     expect(records[0]).toEqual(expectedHeader);
     expect(records.every(row => row.length === expectedHeader.length)).toBe(true);
     const rows = records.slice(1).map(row => Object.fromEntries(expectedHeader.map((name, index) => [name, row[index]])));

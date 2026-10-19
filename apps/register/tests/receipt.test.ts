@@ -159,3 +159,22 @@ test('saved unit receipts preserve count and exact unit price without a weight',
   assert.deepEqual(view.groups, []);
   assert.deepEqual(receiptView(JSON.parse(JSON.stringify(receipt))), view);
 });
+
+test('legacy receipts retain original GRAM identity and UTC without current settings', () => {
+  const receipt = savedReceipt();
+  const view = receiptView(receipt);
+  assert.equal(view.store.display_name, 'GRAM');
+  assert.equal(view.store.receipt_header, '');
+  assert.equal(view.store.receipt_footer, '');
+  assert.equal(view.createdAt, '2024-01-01 00:00:00 UTC');
+});
+test('new receipt identity and timezone come only from immutable config snapshot', () => {
+  const receipt = savedReceipt();
+  receipt.config_snapshot = { store_settings: { display_name: 'Saved store', receipt_header: '<b>Plain text</b>', receipt_contact: 'Saved contact', receipt_footer: 'Saved footer', timezone: 'America/New_York' } };
+  const view = receiptView(receipt);
+  assert.equal(view.store.display_name, 'Saved store');
+  assert.equal(view.store.receipt_header, '<b>Plain text</b>');
+  assert.equal(view.store.receipt_footer, 'Saved footer');
+  assert.match(view.createdAt, /2023-12-31 19:00:00 GMT-05:00 \[America\/New_York\]/);
+  assert.equal(view.total, '$125.00');
+});

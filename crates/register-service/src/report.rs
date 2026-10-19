@@ -1,9 +1,12 @@
 //! Read-only reports from a single validated, immutable ledger snapshot.
 use super::*;
+use chrono::{LocalResult, NaiveDate, Offset, TimeZone, Utc};
+use chrono_tz::Tz;
 use std::collections::BTreeMap;
 
 /// The validated stored records needed by reporting, not cash-session summaries.
 pub(super) struct ReportRecords {
+    pub config_revision: String,
     pub receipts: Vec<Receipt>,
     pub refunds: Vec<RefundReceipt>,
     pub sale_sessions: Vec<SaleSession>,
@@ -20,12 +23,12 @@ struct Totals {
 fn invalid_date() -> ServiceError {
     ServiceError::new(
         "INVALID_INPUT",
-        "Use valid YYYY-MM-DD dates (years 0001–9999), with start before end. The UTC start is inclusive and end is exclusive.",
+        "Use valid YYYY-MM-DD dates (years 0001–9999), with start before end. The selected timezone’s start midnight is inclusive and end midnight is exclusive.",
     )
 }
 
-/// Gregorian calendar midnight, without locale, timezone or floating-point conversion.
-fn utc_midnight(value: &str) -> Result<i64, ServiceError> {
+/// Strict calendar dates, resolved with bundled IANA rules, never host/browser timezone.
+fn local_midnight(value: &str, timezone: Tz) -> Result<i64, ServiceError> {
     let bytes = value.as_bytes();
     if bytes.len() != 10
         || bytes[4] != b'-'
@@ -34,38 +37,61 @@ fn utc_midnight(value: &str) -> Result<i64, ServiceError> {
             .iter()
             .enumerate()
             .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
+        || &value[..4] == "0000"
     {
         return Err(invalid_date());
     }
-    let year: i64 = value[..4].parse().map_err(|_| invalid_date())?;
-    let month: usize = value[5..7].parse().map_err(|_| invalid_date())?;
-    let day: i64 = value[8..].parse().map_err(|_| invalid_date())?;
-    if year == 0 || !(1..=12).contains(&month) {
-        return Err(invalid_date());
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| invalid_date())?;
+    let midnight = date.and_hms_opt(0, 0, 0).ok_or_else(invalid_date)?;
+    match timezone.from_local_datetime(&midnight) {
+        LocalResult::Single(time) => Ok(time.timestamp()),
+        LocalResult::Ambiguous(_, _) => Err(ServiceError::new("INVALID_INPUT", "The selected date has an ambiguous midnight in this timezone. Choose another date boundary.")),
+        LocalResult::None => Err(ServiceError::new("INVALID_INPUT", "The selected date has no midnight in this timezone. Choose another date boundary.")),
     }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if day < 1 || day > days[month - 1] {
-        return Err(invalid_date());
+}
+
+#[cfg(test)]
+fn utc_midnight(value: &str) -> Result<i64, ServiceError> {
+    local_midnight(value, chrono_tz::UTC)
+}
+
+pub(crate) fn validate_timezone(value: &str) -> Result<(), ServiceError> {
+    parse_timezone(value).map(|_| ())
+}
+
+fn parse_timezone(value: &str) -> Result<Tz, ServiceError> {
+    value.parse().map_err(|_| {
+        ServiceError::new(
+            "INVALID_INPUT",
+            "Use a supported IANA timezone, such as UTC or America/Los_Angeles.",
+        )
+    })
+}
+
+fn local_timestamp(timestamp: u64, timezone: Tz) -> Result<(String, String), ServiceError> {
+    let timestamp = i64::try_from(timestamp).map_err(|_| overflow())?;
+    let local = Utc
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .ok_or_else(overflow)?
+        .with_timezone(&timezone);
+    let seconds = local.offset().fix().local_minus_utc();
+    // ISO 8601 permits second-precision offsets. Do not use RFC3339's rounded
+    // minute offsets: historical IANA zones can include offset seconds.
+    let magnitude = seconds.unsigned_abs();
+    let mut offset = format!(
+        "{}{:02}:{:02}",
+        if seconds < 0 { '-' } else { '+' },
+        magnitude / 3600,
+        magnitude % 3600 / 60
+    );
+    if magnitude % 60 != 0 {
+        offset.push_str(&format!(":{:02}", magnitude % 60));
     }
-    let previous = year - 1;
-    let days_before_year = previous * 365 + previous / 4 - previous / 100 + previous / 400;
-    // There are 719162 Gregorian days before 1970-01-01.
-    let unix_days = days_before_year + days[..month - 1].iter().sum::<i64>() + day - 1 - 719162;
-    Ok(unix_days * 86400)
+    Ok((
+        format!("{}{offset}", local.format("%Y-%m-%dT%H:%M:%S")),
+        seconds.to_string(),
+    ))
 }
 
 fn overflow() -> ServiceError {
@@ -77,12 +103,29 @@ fn overflow() -> ServiceError {
 
 impl RegisterService {
     pub fn sales_report(&self, input: SalesReportInput) -> Result<SalesReport, ServiceError> {
-        let start = utc_midnight(&input.start_date)?;
-        let end = utc_midnight(&input.end_date)?;
+        self.sales_report_with_timezone(input.into())
+    }
+
+    pub fn sales_report_with_timezone(
+        &self,
+        input: SalesReportRequest,
+    ) -> Result<SalesReport, ServiceError> {
+        let timezone = parse_timezone(input.timezone.as_deref().unwrap_or("UTC"))?;
+        let start = local_midnight(&input.start_date, timezone)?;
+        let end = local_midnight(&input.end_date, timezone)?;
         if start >= end {
             return Err(invalid_date());
         }
         let records = self.report_records()?;
+        if let Some(expected) = &input.expected_config_revision {
+            parse_integer(expected, "Expected config revision")?;
+            if expected != &records.config_revision {
+                return Err(ServiceError::new(
+                    "STALE_CONFIG",
+                    "Store settings changed. Reload the report before exporting.",
+                ));
+            }
+        }
         let mappings: BTreeMap<_, _> = records
             .sale_sessions
             .into_iter()
@@ -91,6 +134,8 @@ impl RegisterService {
         let mut events = Vec::new();
         for receipt in records.receipts {
             events.push(SalesReportEvent {
+                created_at_local: String::new(),
+                utc_offset_seconds: String::new(),
                 kind: SalesReportEventKind::Sale,
                 event_id: receipt.sale_id.clone(),
                 session_id: mappings.get(&receipt.sale_id).cloned(),
@@ -103,6 +148,8 @@ impl RegisterService {
         }
         for refund in records.refunds {
             events.push(SalesReportEvent {
+                created_at_local: String::new(),
+                utc_offset_seconds: String::new(),
                 kind: SalesReportEventKind::Refund,
                 event_id: refund.refund_id,
                 sale_id: refund.sale_id,
@@ -115,13 +162,16 @@ impl RegisterService {
         }
         let mut selected = Vec::new();
         let mut totals: BTreeMap<(String, u8), Totals> = BTreeMap::new();
-        for event in events {
+        for mut event in events {
             // These values were checked by report_records' backup validation.
             let timestamp = parse_integer(&event.created_at_unix, "Event time")?;
             if i128::from(timestamp) < i128::from(start) || i128::from(timestamp) >= i128::from(end)
             {
                 continue;
             }
+            let (local, offset) = local_timestamp(timestamp, timezone)?;
+            event.created_at_local = local;
+            event.utc_offset_seconds = offset;
             let total = u128::from(parse_integer(&event.total_minor, "Event total")?);
             let group = totals
                 .entry((
@@ -170,7 +220,10 @@ impl RegisterService {
         Ok(SalesReport {
             start_date: input.start_date,
             end_date: input.end_date,
-            timezone: "UTC".into(),
+            timezone: timezone.name().into(),
+            start_at_unix: start.to_string(),
+            end_at_unix: end.to_string(),
+            config_revision: records.config_revision,
             groups,
             events: selected.into_iter().map(|(_, _, _, event)| event).collect(),
         })
@@ -181,7 +234,18 @@ impl RegisterService {
         &self,
         input: SalesReportInput,
     ) -> Result<ExportFile, ServiceError> {
-        let report = self.sales_report(input)?;
+        self.export_sales_report_csv_with_timezone(input.into())
+    }
+
+    pub fn export_sales_report_csv_with_timezone(
+        &self,
+        input: SalesReportRequest,
+    ) -> Result<ExportFile, ServiceError> {
+        // Legacy date-only requests retain header-only empty exports. Explicit
+        // timezone/revision requests preserve their metadata even with no events.
+        let include_empty_metadata =
+            input.timezone.is_some() || input.expected_config_revision.is_some();
+        let report = self.sales_report_with_timezone(input)?;
         let mut content = String::new();
         csv_row(
             &mut content,
@@ -190,6 +254,11 @@ impl RegisterService {
                 "start_date",
                 "end_date",
                 "timezone",
+                "start_at_unix",
+                "end_at_unix",
+                "config_revision",
+                "created_at_local",
+                "utc_offset_seconds",
                 "currency_code",
                 "minor_unit_exponent",
                 "gross_sales_minor",
@@ -206,6 +275,36 @@ impl RegisterService {
                 "reason",
             ],
         );
+        if include_empty_metadata && report.groups.is_empty() && report.events.is_empty() {
+            csv_row(
+                &mut content,
+                &[
+                    "metadata",
+                    &report.start_date,
+                    &report.end_date,
+                    &report.timezone,
+                    &report.start_at_unix,
+                    &report.end_at_unix,
+                    &report.config_revision,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+            );
+        }
         for group in &report.groups {
             csv_row(
                 &mut content,
@@ -214,6 +313,11 @@ impl RegisterService {
                     &report.start_date,
                     &report.end_date,
                     &report.timezone,
+                    &report.start_at_unix,
+                    &report.end_at_unix,
+                    &report.config_revision,
+                    "",
+                    "",
                     &group.currency.code,
                     &group.currency.minor_unit_exponent.to_string(),
                     &group.gross_sales_minor,
@@ -246,6 +350,11 @@ impl RegisterService {
                     &report.start_date,
                     &report.end_date,
                     &report.timezone,
+                    &report.start_at_unix,
+                    &report.end_at_unix,
+                    &report.config_revision,
+                    &event.created_at_local,
+                    &event.utc_offset_seconds,
                     &event.currency.code,
                     &event.currency.minor_unit_exponent.to_string(),
                     "",

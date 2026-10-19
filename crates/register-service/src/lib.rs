@@ -69,6 +69,12 @@ struct ConfigInput {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct StoreSettingsInput {
+    store_settings: StoreSettings,
+    expected_config_revision: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InitializeInput {
     currency: CurrencyDto,
 }
@@ -226,12 +232,12 @@ impl RegisterService {
                 encode(self.initialize_empty(input.currency)?)
             }
             "sales_report" => {
-                let input: SalesReportInput = decode(payload)?;
-                encode(self.sales_report(input)?)
+                let input: SalesReportRequest = decode(payload)?;
+                encode(self.sales_report_with_timezone(input)?)
             }
             "export_sales_report_csv" => {
-                let input: SalesReportInput = decode(payload)?;
-                encode(self.export_sales_report_csv(input)?)
+                let input: SalesReportRequest = decode(payload)?;
+                encode(self.export_sales_report_csv_with_timezone(input)?)
             }
             "export_sales" => {
                 let _: EmptyInput = decode(payload)?;
@@ -240,6 +246,12 @@ impl RegisterService {
             "export_backup" => {
                 let _: EmptyInput = decode(payload)?;
                 encode(self.export_backup()?)
+            }
+            "put_store_settings" => {
+                let input: StoreSettingsInput = decode(payload)?;
+                encode(
+                    self.put_store_settings(input.store_settings, &input.expected_config_revision)?,
+                )
             }
             "put_config" => {
                 let input: ConfigInput = decode(payload)?;
@@ -338,6 +350,7 @@ impl RegisterService {
 
     pub fn initialize_empty(&mut self, currency: CurrencyDto) -> Result<State, ServiceError> {
         self.initialize(Config {
+            store_settings: None,
             schema_version: 1,
             demo: true,
             tax_mode: "demo_no_tax".into(),
@@ -358,6 +371,34 @@ impl RegisterService {
         tx.execute(
             "INSERT INTO settings(singleton,revision,config_json) VALUES(1,1,?1)",
             [serialize(&config)?],
+        )?;
+        tx.commit()?;
+        self.state()
+    }
+
+    /// Update branding only, atomically preserving pricing, currency, catalog and draft.
+    pub fn put_store_settings(
+        &mut self,
+        settings: StoreSettings,
+        expected_revision: &str,
+    ) -> Result<State, ServiceError> {
+        validate_store_settings(&settings)?;
+        let expected = parse_integer(expected_revision, "Expected configuration revision")?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (revision, mut config) = read_config(&tx)?;
+        if expected != revision as u64 {
+            return Err(ServiceError::new("STALE_CONFIG", "Configuration changed in another window. Reload before editing; your changes were not saved."));
+        }
+        config.store_settings = Some(settings);
+        validate_config(&config)?;
+        let next_revision = revision.checked_add(1).ok_or_else(|| {
+            ServiceError::new("INVALID_CONFIG", "Configuration revision limit reached.")
+        })?;
+        tx.execute(
+            "UPDATE settings SET revision=?1,config_json=?2 WHERE singleton=1",
+            params![next_revision, serialize(&config)?],
         )?;
         tx.commit()?;
         self.state()
@@ -738,10 +779,52 @@ fn group_to_core(
     })
 }
 
+/// Store text is plain text, never markup. The mandatory training warning is not configurable.
+pub fn validate_store_settings(settings: &StoreSettings) -> Result<(), ServiceError> {
+    for (label, value, maximum, required) in [
+        (
+            "Store display name",
+            settings.display_name.as_str(),
+            120,
+            true,
+        ),
+        (
+            "Receipt header",
+            settings.receipt_header.as_str(),
+            500,
+            false,
+        ),
+        (
+            "Receipt contact",
+            settings.receipt_contact.as_str(),
+            240,
+            false,
+        ),
+        (
+            "Receipt footer",
+            settings.receipt_footer.as_str(),
+            500,
+            false,
+        ),
+    ] {
+        if (required && value.trim().is_empty())
+            || value.chars().count() > maximum
+            || value.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        {
+            return Err(ServiceError::new("INVALID_CONFIG", format!("{label} must be plain text with at most {maximum} characters, no controls, and a nonempty display name.")));
+        }
+    }
+    report::validate_timezone(&settings.timezone)
+        .map_err(|e| ServiceError::new("INVALID_CONFIG", e.message))
+}
+
 pub fn validate_config(config: &Config) -> Result<(), ServiceError> {
     validate_config_inner(config).map_err(|e| ServiceError::new("INVALID_CONFIG", e.message))
 }
 fn validate_config_inner(config: &Config) -> Result<(), ServiceError> {
+    if let Some(settings) = &config.store_settings {
+        validate_store_settings(settings)?;
+    }
     if config.schema_version != 1 || !config.demo || config.tax_mode != "demo_no_tax" {
         return Err(ServiceError::new("INVALID_CONFIG", "This release supports explicit demo configuration only, with no tax calculated. Production sales are not enabled."));
     }
@@ -1001,6 +1084,7 @@ fn quote_using_config(
 /// Illustrative fixtures only. Callers must explicitly choose initialization.
 pub fn demo_config() -> Config {
     Config {
+        store_settings: None,
         schema_version: 1,
         demo: true,
         tax_mode: "demo_no_tax".into(),

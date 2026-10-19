@@ -6,6 +6,8 @@ publish = false
 description = "Local-only register commands and transactional cash-sale persistence"
 
 [dependencies]
+chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
+chrono-tz = "=0.10.4"
 gram-pos-core = { path = "../.." }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
