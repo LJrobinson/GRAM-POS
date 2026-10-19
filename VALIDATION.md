@@ -216,3 +216,13 @@ The portable core remains unchanged and dependency-free. New timezone dependenci
 ### Milestone 8 first CI correction
 
 At head `9d2a303953e8de6c3f60098088e206d3a5824ebb`, all ten core PR/push jobs (including Rust 1.70 and wasm), both frontend jobs and both Ubuntu services passed. Both Windows service jobs exposed a checkout-only difference in the golden backup fixture: Git converted its LF bytes to CRLF before the byte-preservation assertion. The assertion was retained, and `.gitattributes` now disables text conversion for the three exact-byte compatibility fixtures. This does not change backup serialization or relax receipt immutability. Browser/native jobs were skipped by that dependency failure, not executed successfully. The corrected head requires its own full CI.
+
+### Milestone 8 verified real-browser evidence
+
+At head `08bbd98f4d362e6432044617f8f4eeb5808d9ca4`, both Windows service jobs passed after the fixture-checkout correction, and both real-browser jobs passed. The six new original PNGs come from PR run [39194908384](https://github.com/LJrobinson/GRAM-POS/actions/runs/39194908384), browser job [117875732987](https://github.com/LJrobinson/GRAM-POS/actions/runs/39194908384/job/117875732987), artifact `12161750878` (`gram-pos-register-browser-review`). Original ZIP SHA256 was verified as `a104a8dcd0f0e414b8dcb8029c5cbc511dd4924641a9dc447d8f69de1470ad2a`.
+
+All six images were visually inspected before copying unmodified to `docs/screenshots`: desktop settings capture includes actual editable fields, explicit actions and preview; phone focuses on wrapped identity preview and retained warnings. Both branded receipt captures display Cedar Market, saved contact/footer, explicit Los Angeles GMT-07 label and exact $8.50 sale/$1.50 change after current branding was changed. Desktop reporting shows zone, local dates, resolved UTC bounds, separate refund total and exact large-number fixture totals; phone shows date/zone controls without horizontal overflow, with totals below the fold. Large values are deliberate shared regression fixtures, not business revenue.
+
+The same run's original `receipt-print.pdf` was rendered and visually inspected: one page, legacy GRAM/UTC identity, selected sale only, correct lines/totals and training notice. It is not a branded-receipt PDF or a physical-printer/native-dialog test; no such verification is claimed. The existing milestone-5 PDF remains separately labeled in the README rather than being silently replaced.
+
+At preparation of this evidence commit, Windows packaging was still running on the source head. The final evidence/docs head must receive its own complete PR/push checks and generated installer artifacts before an all-green or ready-to-merge claim.
