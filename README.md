@@ -4,6 +4,12 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Bulk catalog CSV (milestone 7)
+
+Version 0.7.0 adds local, versioned catalog CSV export/templates and a read-only import preview before explicit atomic Apply. SKU is the stable upsert identity; missing products are never deleted. Errors identify rows, duplicate active/archived barcodes, missing price groups, and invalid exact amounts. Revision checks prevent overwriting newer edits. Spreadsheet-safe `text:` encoding is reversible, including leading-zero barcodes and legitimate apostrophes. See the [operator guide and complete CSV format](docs/catalog-csv.md).
+
+CSV workflow screenshots are captured by the new real-service browser tests in CI; only verified captures will be added here. The existing screenshots below document earlier milestones.
+
 ## See the prototype
 
 The original register/catalog/cash-session screenshots below come from the [passing milestone-4 browser CI job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39170235816/job/117801860359) at commit `53332e4`, using the local Rust service and SQLite test data. These show the **training/demo prototype**, not a production register or native-device certification.

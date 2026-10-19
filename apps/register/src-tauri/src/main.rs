@@ -4,7 +4,7 @@ use gram_register_service::{RegisterService, SalesReportInput, ServiceError};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
-    io::Write,
+    io::{Read, Write},
     sync::{Arc, Mutex},
 };
 use tauri::Manager;
@@ -81,12 +81,18 @@ async fn save_export(
             .dialog()
             .file()
             .add_filter(
-                if kind == "sales_report_csv" {
+                if matches!(
+                    kind.as_str(),
+                    "sales_report_csv" | "catalog_csv" | "catalog_template"
+                ) {
                     "CSV"
                 } else {
                     "JSON"
                 },
-                if kind == "sales_report_csv" {
+                if matches!(
+                    kind.as_str(),
+                    "sales_report_csv" | "catalog_csv" | "catalog_template"
+                ) {
                     &["csv"]
                 } else {
                     &["json"]
@@ -108,6 +114,129 @@ async fn save_export(
     .map_err(|_| unavailable())?
 }
 
+#[derive(Debug, Serialize)]
+struct SelectedCatalogCsv {
+    filename: String,
+    content: String,
+}
+
+// There is deliberately no caller path argument or general filesystem grant.
+// Selection reads only the chosen local regular CSV, never applies its content.
+#[tauri::command]
+async fn select_catalog_csv(
+    app: tauri::AppHandle,
+) -> Result<Option<SelectedCatalogCsv>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let selected = app
+            .dialog()
+            .file()
+            .add_filter("Catalog CSV", &["csv"])
+            .blocking_pick_file();
+        let Some(selected) = selected else {
+            return Ok(None);
+        };
+        let path = selected
+            .into_path()
+            .map_err(|_| csv_read_error("Select a local CSV file."))?;
+        read_selected_catalog_csv(&path).map(Some)
+    })
+    .await
+    .map_err(|_| unavailable())?
+}
+
+fn csv_read_error(message: &str) -> CommandError {
+    CommandError {
+        code: "CATALOG_CSV_FILE".into(),
+        message: message.into(),
+    }
+}
+
+// No-follow is enforced at open, not merely by a racy preflight metadata check.
+// Nonblocking Unix opens also prevent a substituted FIFO from hanging a worker.
+fn open_selected_csv_handle(path: &std::path::Path) -> Result<std::fs::File, CommandError> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT: inspect the link itself, never its target.
+        options.custom_flags(0x0020_0000);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| csv_read_error("Cannot safely open the selected regular CSV file."))?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| csv_read_error("Cannot inspect the selected CSV file."))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_REPARSE_POINT includes symlinks and other redirects.
+        if metadata.file_attributes() & 0x0000_0400 != 0 {
+            return Err(csv_read_error(
+                "Select a regular local CSV file, not a link or reparse point.",
+            ));
+        }
+    }
+    if !metadata.is_file() {
+        return Err(csv_read_error(
+            "Select a regular local CSV file, not a device or pipe.",
+        ));
+    }
+    Ok(file)
+}
+
+fn read_selected_catalog_csv(path: &std::path::Path) -> Result<SelectedCatalogCsv, CommandError> {
+    if !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"))
+    {
+        return Err(csv_read_error("Select a .csv file encoded as UTF-8."));
+    }
+    // Inspect before opening to reject pipes/devices without blocking. Recheck
+    // the opened handle, and bound reads even if the selected file grows.
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|_| csv_read_error("Cannot inspect the selected CSV file."))?;
+    if !metadata.is_file() {
+        return Err(csv_read_error(
+            "Select a regular local CSV file, not a link or device.",
+        ));
+    }
+    let file = open_selected_csv_handle(path)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| csv_read_error("Cannot inspect the selected CSV file."))?;
+    let limit = gram_register_service::MAX_CATALOG_CSV_BYTES;
+    if !metadata.is_file() || metadata.len() > limit as u64 {
+        return Err(csv_read_error(
+            "Select a regular CSV file no larger than 1 MiB.",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| csv_read_error("Cannot read the selected CSV file."))?;
+    if bytes.len() > limit {
+        return Err(csv_read_error("CSV files must be no larger than 1 MiB."));
+    }
+    let content = String::from_utf8(bytes)
+        .map_err(|_| csv_read_error("CSV must be valid UTF-8; resave it as UTF-8 CSV."))?;
+    Ok(SelectedCatalogCsv {
+        filename: path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        content,
+    })
+}
+
 fn generate_export(
     service: &RegisterService,
     kind: &str,
@@ -116,6 +245,8 @@ fn generate_export(
     match kind {
         "backup" => Ok(service.export_backup()?),
         "sales" => Ok(service.export_sales()?),
+        "catalog_csv" => Ok(service.export_catalog_csv()?),
+        "catalog_template" => Ok(service.catalog_csv_template()?),
         "sales_report_csv" => {
             Ok(
                 service.export_sales_report_csv(range.ok_or_else(|| CommandError {
@@ -126,7 +257,7 @@ fn generate_export(
         }
         _ => Err(CommandError {
             code: "INVALID_EXPORT".into(),
-            message: "Choose a backup, sales JSON, or sales report CSV export.".into(),
+            message: "Choose a backup, sales JSON, sales report CSV, catalog CSV, or catalog template export.".into(),
         }),
     }
 }
@@ -181,7 +312,11 @@ fn main() {
                 .build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![register_command, save_export])
+        .invoke_handler(tauri::generate_handler![
+            register_command,
+            save_export,
+            select_catalog_csv
+        ])
         .run(tauri::generate_context!())
         .expect("GRAM POS could not start; check local data-directory access and WebView2");
 }
@@ -189,6 +324,111 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn csv_test_path(suffix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "gram-native-csv-{}-{}.{suffix}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn selected_csv_is_bounded_utf8_and_selection_does_not_apply() {
+        let path = csv_test_path("csv");
+        let content = "sku,name\r\n00123,Crème\r\n";
+        std::fs::write(&path, content).unwrap();
+        let selected = read_selected_catalog_csv(&path).unwrap();
+        assert_eq!(selected.content, content);
+        assert_eq!(
+            selected.filename,
+            path.file_name().unwrap().to_string_lossy()
+        );
+        // Reading returns text only; no register/database handle is accepted.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert_eq!(
+            read_selected_catalog_csv(&path).unwrap_err().code,
+            "CATALOG_CSV_FILE"
+        );
+        std::fs::write(
+            &path,
+            vec![b'a'; gram_register_service::MAX_CATALOG_CSV_BYTES + 1],
+        )
+        .unwrap();
+        assert_eq!(
+            read_selected_catalog_csv(&path).unwrap_err().code,
+            "CATALOG_CSV_FILE"
+        );
+        std::fs::remove_file(path).unwrap();
+        let path = csv_test_path("json");
+        std::fs::write(&path, "{}").unwrap();
+        assert!(read_selected_catalog_csv(&path).is_err());
+        std::fs::remove_file(path).unwrap();
+        let path = csv_test_path("csv");
+        std::fs::create_dir(&path).unwrap();
+        assert!(read_selected_catalog_csv(&path).is_err());
+        std::fs::remove_dir(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn safe_open_rejects_replaced_links_and_pipes_without_following_or_blocking() {
+        use std::os::unix::fs::symlink;
+        let target = csv_test_path("csv");
+        let selected = csv_test_path("csv");
+        std::fs::write(&target, "do not follow").unwrap();
+        std::fs::write(&selected, "original").unwrap();
+        assert!(std::fs::symlink_metadata(&selected).unwrap().is_file());
+        // Simulate replacement between preflight metadata and open.
+        std::fs::remove_file(&selected).unwrap();
+        symlink(&target, &selected).unwrap();
+        assert!(open_selected_csv_handle(&selected).is_err());
+        std::fs::remove_file(&selected).unwrap();
+        let c_path = std::ffi::CString::new(selected.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: c_path is a valid, owned NUL-terminated path; no aliasing.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        assert!(open_selected_csv_handle(&selected).is_err());
+        std::fs::remove_file(selected).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "do not follow");
+        std::fs::remove_file(target).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn safe_open_rejects_windows_reparse_points_when_symlinks_are_supported() {
+        let target = csv_test_path("csv");
+        let selected = csv_test_path("csv");
+        std::fs::write(&target, "do not follow").unwrap();
+        match std::os::windows::fs::symlink_file(&target, &selected) {
+            Ok(()) => {
+                assert!(open_selected_csv_handle(&selected).is_err());
+                std::fs::remove_file(selected).unwrap();
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("Windows symlink test skipped: runner lacks symlink privilege.");
+            }
+            Err(error) => panic!("Could not create test symlink: {error}"),
+        }
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "do not follow");
+        std::fs::remove_file(target).unwrap();
+    }
+
+    #[test]
+    fn catalog_exports_are_service_generated_and_fixed_kind() {
+        let mut service = RegisterService::in_memory().unwrap();
+        service.initialize_demo().unwrap();
+        for kind in ["catalog_csv", "catalog_template"] {
+            let file = generate_export(&service, kind, None).unwrap();
+            assert!(file.filename.ends_with(".csv"));
+            assert!(file.content.contains("unit_price_minor"));
+            assert_eq!(file.media_type, "text/csv;charset=utf-8");
+        }
+        assert!(generate_export(&service, "../catalog.csv", None).is_err());
+    }
 
     #[test]
     fn keyboard_barcode_uses_existing_bounded_dispatch() {
@@ -342,7 +582,11 @@ mod tests {
             serde_json::from_str(include_str!("../capabilities/register.json")).unwrap();
         assert_eq!(
             capability["permissions"],
-            serde_json::json!(["allow-register-command", "allow-save-export"])
+            serde_json::json!([
+                "allow-register-command",
+                "allow-save-export",
+                "allow-select-catalog-csv"
+            ])
         );
         assert_eq!(capability["windows"], serde_json::json!(["main"]));
         assert_eq!(capability["local"], true);

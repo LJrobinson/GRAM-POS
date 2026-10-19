@@ -59,7 +59,7 @@ fix a startup problem; check directory permissions and preserve a backup first.
 SQLite lives behind a mutex and bounded service commands. Frontend code cannot
 select a database path, run SQL, access arbitrary files, launch processes, open
 the shell, or call an HTTP plugin. Only the local `main` window receives the
-`allow-register-command` and `allow-save-export` permissions. External navigation and remote frame
+`allow-register-command`, `allow-save-export`, and `allow-select-catalog-csv` permissions. External navigation and remote frame
 content are blocked; release CSP allows IPC but no network connections.
 SQLite is not encrypted, and this prototype does not supply login, roles,
 automatic backups, or tamper-proof storage. Manual JSON exports use a native
@@ -100,3 +100,11 @@ The saved-receipt view uses a user-triggered `window.print()` call, following Ta
 ## Milestone 6 keyboard scanner input
 
 Version 0.6.0 accepts barcode text only through the focused register field. Keyboard-style HID scanners use ordinary text entry and Enter; there is no native scanner driver, global keyboard hook, camera/device permission or expanded capability. `lookup_barcode` uses the existing bounded register-command dispatcher. Unit products have integer item counts and fixed unit prices, not declared grams. Browser/CI coverage does not certify a physical scanner or native-device timing.
+
+## Milestone 7 local catalog CSV
+
+Version 0.7.0 adds `select_catalog_csv` and only its `allow-select-catalog-csv` capability. The command accepts no caller-provided path or content: the native picker selects one local regular `.csv` file, read with a 1 MiB cap and strict UTF-8 decoding. Selection returns `{filename, content}` or `null` on cancel and never imports. Preview and explicit atomic Apply use the existing service dispatcher with revision checks. No broad filesystem grant, shell access, or scanner driver is added.
+
+The fixed `catalog_csv` and `catalog_template` export kinds use `save_export`; output bytes come only from Rust and existing destination files are never overwritten. See [format and operator instructions](../../../docs/catalog-csv.md) for reversible `text:` encoding, SKU upserts, error recovery, and spreadsheet limits. Existing backups and receipts remain valid; new multiline product names require version 0.7.0 validation.
+
+Safe opening rejects substituted final-component links and special files: Unix uses `O_NOFOLLOW | O_NONBLOCK` (the existing transitive libc package is now also a target-Unix direct dependency); Windows opens the reparse point itself and rejects its handle attributes before reading. Both paths validate the opened handle and retain the byte cap. Unix helper tests include replacement with a symlink and FIFO. The Windows symlink test reports a skip when the runner lacks symlink privilege; full native validation remains a Windows CI/manual responsibility.

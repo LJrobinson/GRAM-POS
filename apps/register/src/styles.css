@@ -29,3 +29,27 @@
 .barcode-controls input { flex: 1; min-width: 180px; padding: 11px; border: 1px solid #bdccc4; border-radius: 8px; }
 .barcode-controls input:focus { outline: 2px solid #197353; outline-offset: 2px; }
 .barcode-scanner .input-help { margin-bottom: 0; }
+
+/* Bounded, touch-friendly CSV review; filenames and user data may be very long. */
+.catalog-import { margin-top: 24px; overflow-wrap: anywhere; }
+.catalog-import button, .catalog-import input[type=file] { min-height: 44px; }
+.csv-file-label { display: grid; gap: 10px; margin: 20px 0; font-weight: 600; }
+.csv-file-label input { max-width: 100%; padding: 10px; border: 1px solid #d9e2dc; border-radius: 8px; }
+.csv-review { margin-top: 20px; padding: 18px; background: #f6f8f5; border-radius: 12px; }
+.csv-rows, .csv-issues { max-height: 360px; overflow: auto; padding: 0; list-style: none; }
+.csv-rows li, .csv-issues li { padding: 12px 4px; border-bottom: 1px solid #dce5de; }
+.csv-rows li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.csv-issues { color: #9c3028; }
+.editor-grid textarea { width:100%; min-width:0; min-height:64px; resize:vertical; border:1px solid #dce3d5; border-radius:8px; padding:10px; background:#fff; font:inherit; }
+.csv-rows li { display:block; }
+.csv-rows details summary { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; min-height:44px; align-items:center; cursor:pointer; }
+.csv-rows details summary::after { content:'View product details'; font-size:12px; text-decoration:underline; }
+.csv-comparison { display:flex; flex-wrap:wrap; gap:20px; padding:12px 0; }
+.csv-product-review { flex:1 1 220px; min-width:0; }
+.csv-product-review h4 { margin:0 0 10px; }
+.csv-product-review dl { margin:0; }
+.csv-product-review dl div { padding:6px 0; }
+.csv-product-review dt { font-size:12px; color:#627165; }
+.csv-product-review dd { margin:4px 0 0; white-space:pre-wrap; font-size:14px; }
+.csv-format-help { margin:16px 0; }
+.csv-format-help summary { min-height:44px; padding:12px 0; cursor:pointer; }

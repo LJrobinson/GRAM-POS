@@ -224,3 +224,15 @@ or external publication is part of these acceptance results.
 - Only the focused scanner field submits on Enter. Count-item scans add one item/package; measured scans request weight. Repeated deliberate scans are distinct, asynchronous lookups are serialized, and cancellation/navigation prevents late results from changing a different screen or cart context.
 - Saved unit receipts, full-sale refunds and report totals use the original immutable money and quantity snapshots after product edits. Older configs without barcodes and measured/prepacked receipt/backup records remain valid; recovery preserves original raw records and retry identities.
 - Browser tests capture actual unit/scanner desktop and phone states. Test discovery is not runtime execution, and successful browser/native packaging does not certify physical HID scanners, printer/scales, device synchronization or production use. Check VALIDATION.md for what actually ran.
+
+
+## Milestone 7: local catalog CSV
+
+- Select a UTF-8 CSV without applying; preview validates exact schema and all rows, displaying source row/line errors and complete before/after product values.
+- Review mixed unit/prepack/measured creates and updates. Cancel changes nothing; explicit Apply writes the whole valid batch or nothing.
+- Exact required SKU upserts; leading-zero barcodes and Unicode text survive reversible spreadsheet-safe export/reimport. Duplicate SKU/barcode conflicts (including archived/omitted products) and missing price groups reject the batch.
+- Stale revision fails without overwrite. After lost response, authoritative refresh and a new review prevent duplicate creates. Failed refresh never silently discards later unsaved edits.
+- Test malformed quoting, headers, booleans, types, controls, bounds, precision and overflow, and source positions after quoted multiline names.
+- Existing receipt bytes, cash ledger, drafts and v1/v2 backups remain valid; catalog import does not edit pricing groups, stock or tax.
+- Native selection exposes no caller path, uses safe regular-file opening and bounded reads, and grants no general filesystem access.
+- Browser CI captures real invalid/valid desktop/mobile review screens, including before/after values. Local discovery is not browser execution; only promote screenshots after CI passes.

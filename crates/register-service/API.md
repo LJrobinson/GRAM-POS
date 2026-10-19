@@ -1,4 +1,4 @@
-# GRAM register service: milestone 6
+# GRAM register service: milestone 7
 
 `gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
 
@@ -44,6 +44,10 @@ Use stable, unique line IDs. Catalog SKU determines kind, declared package conte
 | `put_config` | `{config: Config,expected_config_revision:"1"}` | State, after complete validation and revision increment; stale revision fails `STALE_CONFIG` |
 | `export_sales` | `{}` | `{filename,media_type,content}` with versioned full receipt JSON |
 | `export_backup` | `{}` | `{filename,media_type,content}` with consistent logical backup JSON |
+| `export_catalog_csv` | `{}` | Saved catalog as reversible spreadsheet-safe `ExportFile` |
+| `catalog_csv_template` | `{}` | Header-only CSV `ExportFile`; available before configuration |
+| `preview_catalog_csv` | `{csv:"UTF-8 CSV text"}` | Read-only `CatalogCsvPreview`; row/physical-line issues and create/update/unchanged actions |
+| `apply_catalog_csv` | `{csv:"same reviewed text",expected_config_revision:"1"}` | State after atomic revalidation/upsert; stale or invalid batches change nothing |
 | `lookup_barcode` | `{barcode:"001234"}` | `{item: CatalogItem,config_revision:"1"}`; exact active match, otherwise `UNKNOWN_BARCODE` / `ARCHIVED_PRODUCT` |
 | `quote_cart` | `{lines: CartInputLine[]}` | `Quote` from the Rust core |
 | `save_draft` | `{lines: CartInputLine[]}` | `{saved:true}` |
@@ -196,3 +200,30 @@ Reports use one consistent, validated saved-ledger snapshot. A sale is selected 
 CSV is UTF-8, with one rectangular 18-column schema: `record_type,start_date,end_date,timezone,currency_code,minor_unit_exponent,gross_sales_minor,refunds_minor,net_sales_minor,sale_count,refund_count,event_kind,event_id,sale_id,created_at_unix,total_minor,session_id,reason`. `summary` rows hold each currency/precision aggregate; `event` rows hold the matching immutable sale/refund details. Columns not applicable to a row are empty. Do not add summary rows and event rows together. An empty report produces only the header. All cells are RFC 4180 quoted, embedded quotes are doubled, and records end with CRLF. Unicode is preserved. Spreadsheet formula-leading refund text (`=`, `+`, `-`, `@`, including after whitespace) and leading tab/newline controls are prefixed with an apostrophe. Numeric cells contain only validated exact decimal representations, never formula expressions.
 
 CSV preserves the full integer digits, but spreadsheet auto-detection can round long numbers. Import money, count, ID and Unix-time columns as **text** when exact large values must be preserved. JSON reports retain these values as strings. Reporting/exporting does not change the draft, catalog, receipt snapshots, idempotency keys, drawer state or versioned backup/recovery format. CSV is a report, not a recoverable backup.
+
+
+## Versioned local catalog CSV
+
+See [operator guide and exact CSV schema](../../docs/catalog-csv.md). CSV is bounded to 1 MiB UTF-8 and 1000 data rows; final catalog also stays within 1000 products. Strict CSV quoting preserves Unicode, commas, doubled quotes, and embedded CR/LF in product names. Identifiers reject controls; names permit only embedded CR/LF, not other controls. There are no new dependencies, migrations, backup fields, or generated product IDs.
+
+All rows use format `gram_catalog_v1`. Nonempty SKU, name, barcode and group-ID cells have a mandatory reversible `text:` prefix, which export adds and import removes exactly once. This prevents spreadsheet formula execution without stripping legitimate apostrophes and protects numeric-looking identifiers. Other cells are constrained enums, booleans or exact unsigned decimal strings. SKU is the sole explicit stable product identity: exact case-sensitive upsert, no barcode/name fallback, no deletion of omitted products, and no pricing-group changes. Complete product state is required; empty optional fields clear them.
+
+`preview_catalog_csv` returns:
+
+```json
+{
+  "expected_config_revision": "1",
+  "can_apply": false,
+  "rows": [],
+  "issues": [{"row": 1, "line": 2, "field": "sku", "message": "..."}],
+  "created": 0, "updated": 0, "unchanged": 0
+}
+```
+
+Valid rows include `{row,line,sku,action,before,after}` where `action` is `create`, `update`, or `unchanged`; `before` is the old `CatalogItem` or null, and `after` is the proposed complete `CatalogItem`. Review these details, not just counts. Row numbers count data records from 1, physical line numbers count source lines from 1, and header/file issues use row 0. Invalid preview data is represented by issues and `can_apply:false`, not a partial import. Transport/shape errors still return `ServiceError`. Preview is read-only and reserves nothing.
+
+`apply_catalog_csv` does not accept a client-built candidate catalog or trusting preview token. It acquires an immediate SQLite write transaction, reads current configuration, compares the exact expected revision, reparses and validates the complete CSV and merged catalog, and commits configuration plus its incremented revision together. `STALE_CONFIG`, `INVALID_CATALOG_CSV`, parse, storage and other pre-commit errors change nothing. Unchanged imports leave revision intact. Configuration currency and groups cannot change, so an open cash session is not re-denominated. Drafts and original receipts are not rewritten.
+
+After an uncertain transport outcome, fetch `get_state`, preview the same CSV again, review, then explicitly apply if still needed. Do not blindly retry. Stable required SKUs ensure a committed create becomes unchanged/update in the next preview; the old revision cannot duplicate it. This is not checkout's idempotency-key contract and does not add an operation journal. Another process may change configuration after commit and before the returned State read; State is authoritative latest saved data, not proof of a transaction-specific snapshot.
+
+The native `select_catalog_csv` picker has no caller path parameter and returns `{filename,content}` or null; selecting a file is not an import. Native `save_export` gains fixed kinds `catalog_csv` and `catalog_template`; it still generates all bytes in the service and never overwrites an existing file. The development JSON transport is capped at 8 MiB to allow escaped CSV payloads; the service enforces the independent 1 MiB CSV bound. No production network service, shell execution, filesystem grant or automatic import is added.
