@@ -179,3 +179,12 @@ The catalog tests cover read-only preview; atomic invalid-batch rejection; separ
 Two read-only reviews identified and fixed a native file check/open race and unsaved-edit recovery refresh path before freezing. No additional blocking findings remained.
 
 Not run locally: real Chromium browser execution/screenshots, complete native Tauri compile/tests or Windows installer. The browser executable and Linux GTK/WebKit runtime are unavailable; no denied installation/escalation was retried. The existing CI jobs must validate the exact published commit before merge. New browser tests attach actual invalid/valid desktop/phone CSV review captures; no new screenshot is claimed or fabricated here. The Windows reparse-point regression can explicitly skip if the runner lacks symlink privilege, so manual native-picker review remains useful even after CI passes.
+
+
+### Milestone 7 verified browser CI evidence
+
+At head `946979bfe204339ef6d4234920a5917aee702708`, both the PR and push browser jobs passed all **16 scenarios**, including all seven catalog CSV scenarios. The committed original CSV PNGs come from PR run [39187501879](https://github.com/LJrobinson/GRAM-POS/actions/runs/39187501879), browser job [117853222635](https://github.com/LJrobinson/GRAM-POS/actions/runs/39187501879/job/117853222635), artifact `12158324168` (`gram-pos-register-browser-review`). The downloaded original ZIP SHA256 was verified as `b62d73b479348bd30eacc32b5a153bdb7fdde5216833fc345361f2788cf1be91`.
+
+The four unmodified CSV screenshots were visually inspected: desktop valid preview shows the create/update summary and saved/imported product details; desktop invalid preview shows exact row/line price and duplicate-barcode errors with disabled Apply; phone captures show wrapped review/errors without horizontal page overflow. Screenshots are viewport captures, so lower details and actions can require vertical scrolling. Large price and formula-shaped text fixtures are intentional exact-arithmetic/injection tests, not real transactions.
+
+The narrow CI change `-- --show-output` on native tests makes the Windows reparse-point test's privilege-skip message observable in the final-head logs. It does not elevate permissions or claim a physical file-picker test. At preparation of this evidence update, both original-head Windows packaging jobs remained running. The final evidence/workflow commit must receive its own complete CI run before any all-green or installer claim.
