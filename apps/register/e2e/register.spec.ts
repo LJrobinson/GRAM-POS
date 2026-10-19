@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { fixtureCommand, reloadRegister } from './fixture-command';
 
 test('real Rust register: mixed cart, responsive layout, lost response retry, receipt and configuration', async ({ page, request }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const api = async (command: string, payload: unknown = {}) => {
-    const response = await request.post('/api/command', { data: { command, payload } });
-    const result = await response.json();
+    const result = await fixtureCommand(request, command, payload);
     expect(result.ok, JSON.stringify(result)).toBe(true);
     return result.data;
   };
@@ -67,7 +67,7 @@ test('real Rust register: mixed cart, responsive layout, lost response retry, re
   expect((await api('get_state')).draft.lines).toHaveLength(0);
   await page.screenshot({ path: testInfo.outputPath('saved-receipt.png'), fullPage: true });
   await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await page.reload();
+  await reloadRegister(page);
   await page.getByRole('button', { name: 'Sales history', exact: true }).click();
   await expect(page.locator('.sale-row')).toHaveCount(1);
   await page.locator('.sale-row').click();
@@ -88,7 +88,7 @@ test('real Rust register: mixed cart, responsive layout, lost response retry, re
 
 test('catalog editing, archives, atomic validation, conflict recovery and portable downloads', async ({ page, request }, testInfo) => {
   const api = async (command: string, payload: unknown = {}) => {
-    const result = await (await request.post('/api/command', { data: { command, payload } })).json();
+    const result = await fixtureCommand(request, command, payload);
     expect(result.ok, JSON.stringify(result)).toBe(true);
     return result.data;
   };
@@ -147,6 +147,7 @@ test('catalog editing, archives, atomic validation, conflict recovery and portab
   await page.getByRole('button', { name: /Custom pack/ }).click();
   await page.getByRole('button', { name: 'Add to cart', exact: true }).click();
   await expect(page.locator('.total-row')).toContainText('6.00');
+  page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Clear', exact: true }).click();
   await page.getByRole('button', { name: 'Configuration', exact: true }).click();
   await page.getByRole('button', { name: `Unarchive product ${number}`, exact: true }).click();
@@ -171,7 +172,7 @@ test('catalog editing, archives, atomic validation, conflict recovery and portab
     expect(await file.failure()).toBeNull();
     const data = JSON.parse(await readFile(testInfo.outputPath(file.suggestedFilename()), 'utf8'));
     expect(data.format).toBe(label === 'Download portable backup' ? 'gram-pos-backup' : 'gram-pos-sales');
-    expect(data.format_version).toBe(2);
+    expect(data.format_version).toBe(label === 'Download portable backup' ? 3 : 2);
     if (label === 'Download portable backup') expect(JSON.parse(data.settings.config_json).catalog[number - 1].name).toBe('Other window edit');
     else expect(data.receipts).toHaveLength((await api('list_sales')).sales.length);
   }
@@ -184,7 +185,7 @@ test('catalog editing, archives, atomic validation, conflict recovery and portab
 
 test('full refund and immutable drawer close recover lost responses across restart', async ({ page, request }, testInfo) => {
   const api = async (command: string, payload: unknown = {}) => {
-    const result = await (await request.post('/api/command', { data: { command, payload } })).json();
+    const result = await fixtureCommand(request, command, payload);
     expect(result.ok, JSON.stringify(result)).toBe(true);
     return result.data;
   };
@@ -212,7 +213,7 @@ test('full refund and immutable drawer close recover lost responses across resta
   });
   await page.getByRole('button', { name: 'Confirm full cash refund', exact: true }).click({ clickCount: 2 });
   await expect(page.getByRole('button', { name: 'Retry same cash action', exact: true })).toBeEnabled();
-  await page.reload();
+  await reloadRegister(page);
   await page.getByRole('button', { name: 'Retry same cash action', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Cash sessions.' })).toBeVisible();
   expect(refundKeys).toHaveLength(2); expect(refundKeys[0]).toBe(refundKeys[1]);
@@ -233,7 +234,7 @@ test('full refund and immutable drawer close recover lost responses across resta
   });
   await page.getByRole('button', { name: 'Confirm and close session', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Retry same cash action', exact: true })).toBeEnabled();
-  await page.reload();
+  await reloadRegister(page);
   await page.getByRole('button', { name: 'Retry same cash action', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'No open cash session', exact: true })).toBeVisible();
   ledger = await api('get_cash_ledger');
@@ -263,7 +264,7 @@ test('full refund and immutable drawer close recover lost responses across resta
   });
   await page.getByRole('button', { name: 'Confirm opening float', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Retry same cash action', exact: true })).toBeEnabled();
-  await page.reload();
+  await reloadRegister(page);
   await page.getByRole('button', { name: 'Retry same cash action', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Open drawer session', exact: true })).toBeVisible();
   expect(openKeys).toHaveLength(2); expect(openKeys[0]).toBe(openKeys[1]);
@@ -281,7 +282,7 @@ test('blank onboarding requires explicit currency and opens configuration', asyn
       expect(payload).toEqual({ currency: { code: 'CAD', minor_unit_exponent: 2 } });
       configured = true;
     }
-    await route.fulfill({ json: { ok: true, data: { configured, config_revision: configured ? '1' : '0', config: configured ? config : null, catalog: [], draft: { lines: [] } } } });
+    await route.fulfill({ json: { ok: true, data: { configured, config_revision: configured ? '1' : '0', config: configured ? config : null, catalog: [], draft: { lines: [] }, draft_revision: '0', active_draft: null, parked_drafts: [] } } });
   });
   await page.goto('/');
   await page.getByText('Start with an empty catalog instead', { exact: true }).click();
@@ -303,9 +304,7 @@ test.describe('Printable receipts and sales reports', () => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     const api = async (command: string, payload: unknown = {}) => {
-      const response = await request.post('/api/command', { data: { command, payload } });
-      expect(response.ok()).toBe(true);
-      const result = await response.json();
+      const result = await fixtureCommand(request, command, payload);
       expect(result.ok, JSON.stringify(result)).toBe(true);
       return result.data;
     };
@@ -386,7 +385,7 @@ test.describe('Printable receipts and sales reports', () => {
       expected_session_id: ledger.active_session.session_id, expected_currency: initial.config.currency,
     });
     expect(refund.amount_minor).toBe('4575');
-    await page.reload();
+    await reloadRegister(page);
     await page.getByRole('button', { name: 'Sales history', exact: true }).click();
     await page.locator('.sale-row').filter({ hasText: original.receipt_number }).click();
     await expect(page.locator('.refund-status')).toContainText('Fully refunded');
@@ -528,7 +527,7 @@ test.describe('Printable receipts and sales reports', () => {
     await api('put_config', { config: largeState.config, expected_config_revision: largeState.config_revision });
     const large = await checkout('report-test-large-sale', [{ id: 'report-large-line', sku: 'REPORT-LARGE', quantity: { kind: 'prepacked', count: '1' } }], '9007199254740993');
     expect(large.quote.total_minor).toBe('9007199254740993');
-    await page.reload();
+    await reloadRegister(page);
     await page.getByRole('button', { name: 'Sales history', exact: true }).click();
     await page.locator('.sale-row').filter({ hasText: large.receipt_number }).click();
     await expect(receipt.locator('.receipt-total')).toContainText('$90,071,992,547,409.93');

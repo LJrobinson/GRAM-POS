@@ -85,8 +85,8 @@ Installer, capability, and CSP configuration follows the official
 is original project geometry, with editable source in `icons/icon.svg`.
 
 
-Version 0.4 adds local training cash sessions and full-sale refunds. On first
-open, recognized schema-1 databases migrate transactionally to schema 2 without
+Version 0.4 added local training cash sessions and full-sale refunds. In the current
+0.9.0 app, recognized schema-1/2 databases migrate transactionally to schema 3 without
 rewriting old receipts. Keep a pre-upgrade backup and do not reopen the upgraded
 file with an older app. The existing bounded IPC command handles the ledger;
 no new filesystem/network permissions or payment integration are added.
@@ -108,3 +108,12 @@ Version 0.7.0 adds `select_catalog_csv` and only its `allow-select-catalog-csv` 
 The fixed `catalog_csv` and `catalog_template` export kinds use `save_export`; output bytes come only from Rust and existing destination files are never overwritten. See [format and operator instructions](../../../docs/catalog-csv.md) for reversible `text:` encoding, SKU upserts, error recovery, and spreadsheet limits. Existing backups and receipts remain valid; new multiline product names require version 0.7.0 validation.
 
 Safe opening rejects substituted final-component links and special files: Unix uses `O_NOFOLLOW | O_NONBLOCK` (the existing transitive libc package is now also a target-Unix direct dependency); Windows opens the reparse point itself and rejects its handle attributes before reading. Both paths validate the opened handle and retain the byte cap. Unix helper tests include replacement with a symlink and FIFO. The Windows symlink test reports a skip when the runner lacks symlink privilege; full native validation remains a Windows CI/manual responsibility.
+
+
+## Parked carts (0.9.0)
+
+Park, preview, resume and discard use the existing bounded `register_command` dispatcher, the same local SQLite file and the same native export picker. No filesystem permission, network listener or plugin capability is added. The service checks durable draft identity and revision, preserves original quantity kinds, and consumes the active identity atomically with checkout. Native dispatch regressions cover the parked-cart lifecycle and backup contents; a compiled test does not certify native window behavior or physical peripherals. See [the parked-cart guide](../../../docs/parked-carts.md).
+
+The frontend requires Web Locks for safe same-origin recovery-key coordination. It checks the capability at runtime and refuses cart writes if unavailable; it does not substitute a non-atomic browser-storage lock. The Windows package bundles WebView2 installation support, but native UI/runtime capability still needs actual platform verification beyond Rust dispatcher tests.
+
+The existing Windows origin is deliberately unchanged: Tauri documents the default as `http://<scheme>.localhost` ([configuration reference](https://v2.tauri.app/reference/config/#windowconfig)); its maintainer confirms `http://tauri.localhost` is treated as a secure desktop origin ([upstream discussion](https://github.com/tauri-apps/tauri/issues/12331)). This matches the [W3C secure-context rules for `.localhost`](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy). Changing `useHttpsScheme` between releases changes browser storage location, so the upgrade must not silently switch schemes and orphan existing pending checkout keys. Browser CI also probes the exact Windows origin with Chromium, but this remains engine/origin evidence, not a running Tauri/WebView2 UI certification.

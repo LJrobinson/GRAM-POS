@@ -46,6 +46,8 @@ fn sale(service: &mut RegisterService, key: &str) -> Receipt {
     let quote = service.quote(&lines).unwrap();
     service
         .complete_cash_sale(CheckoutInput {
+            expected_draft_id: None,
+            expected_draft_revision: None,
             expected_session_id: None,
             expected_currency: None,
             idempotency_key: key.into(),
@@ -84,7 +86,15 @@ fn genuine_pre_settings_fixtures_keep_bytes_and_default_only_for_display() {
     let old_backup = include_str!("fixtures/pre-settings-backup.json");
     RegisterService::restore_backup(old_backup, &destination).unwrap();
     let mut service = RegisterService::open(&destination).unwrap();
-    assert_eq!(service.export_backup().unwrap().content, old_backup);
+    // The v3 envelope gains only its version and empty workflow section. Keep an
+    // exact whole-file comparison so every legacy JSON byte remains covered.
+    let expected = format!(
+        "{},\n  \"draft_workflow\": {{\n    \"metadata\": {{\n      \"revision\": \"0\",\n      \"next_id\": \"1\",\n      \"guarded\": false,\n      \"active_id\": null,\n      \"guarded_since_revision\": null\n    }},\n    \"records\": [],\n    \"operations\": []\n  }}\n}}\n",
+        old_backup.strip_suffix("\n}\n").unwrap()
+            .replace("\"format_version\": 2", "\"format_version\": 3")
+            .replace("\"schema_version\": 2", "\"schema_version\": 3")
+    );
+    assert_eq!(service.export_backup().unwrap().content, expected);
     save(&mut service, settings("New identity"));
     assert_eq!(
         serde_json::to_string(&service.receipt("1").unwrap()).unwrap(),
@@ -288,6 +298,8 @@ fn branding_change_requires_a_fresh_quote_before_checkout() {
     }];
     let quote = service.quote(&lines).unwrap();
     let request = CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         expected_session_id: None,
         expected_currency: None,
         idempotency_key: "stale-branding".into(),

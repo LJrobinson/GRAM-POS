@@ -1,9 +1,11 @@
 import { test, expect, type APIRequestContext, type Page, type TestInfo, type Locator } from '@playwright/test';
 
+import { fixtureCommand, reloadRegister } from './fixture-command';
+
 // All pricing, persistence, lookups and refunds go to the real Rust service.
 // Routes below only delay or lose a real response to exercise UI race recovery.
 const command = async (request: APIRequestContext, name: string, payload: unknown = {}) =>
-  (await request.post('/api/command', { data: { command: name, payload } })).json();
+  fixtureCommand(request, name, payload);
 const api = async (request: APIRequestContext, name: string, payload: unknown = {}) => {
   const result = await command(request, name, payload);
   expect(result.ok, JSON.stringify(result)).toBe(true);
@@ -211,6 +213,7 @@ test('focused keyboard scanner preserves two scans, reports errors and prompts m
   await expect(page.locator('.cart-line')).toHaveCount(2);
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   expect((await api(request, 'get_state')).draft.lines).toHaveLength(2);
+  page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Clear', exact: true }).click();
   await expect(page.locator('.cart-line')).toHaveCount(0);
   await expect.poll(async () => (await api(request, 'get_state')).draft.lines.length).toBe(0);
@@ -225,7 +228,7 @@ test('focused keyboard scanner preserves two scans, reports errors and prompts m
   await expect(page.getByRole('alert')).toContainText('Catalog changed. Reload the register before scanning again.');
   await expect(page.locator('.cart-line')).toHaveCount(0);
   expect((await api(request, 'get_state')).draft.lines).toHaveLength(0);
-  await page.reload();
+  await reloadRegister(page);
   await barcode.fill('001234567890');
   await barcode.press('Enter');
   await expect(page.locator('.cart-line')).toHaveCount(1);
@@ -249,7 +252,7 @@ test('cancel, navigation and clearing the cart discard pending barcode lookup re
     await page.getByLabel('Barcode', { exact: true }).fill('001234567890');
     await page.getByLabel('Barcode', { exact: true }).press('Enter');
     if (action === 'cancel') await page.getByRole('button', { name: 'Cancel scan', exact: true }).click();
-    else if (action === 'clear') await page.getByRole('button', { name: 'Clear', exact: true }).click();
+    else if (action === 'clear') { page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Clear', exact: true }).click(); }
     else {
       await page.getByRole('button', { name: 'Configuration', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Configuration.', exact: true })).toBeVisible();
@@ -307,7 +310,7 @@ test('ordinary count checkout has no mass and receipt snapshot survives catalog 
   await api(request, 'put_config', { config: changed.config, expected_config_revision: changed.config_revision });
   const refund = await api(request, 'refund_cash_sale', { idempotency_key: 'unit-e2e-refund', sale_id: saleId, reason: 'Unit product training return', expected_session_id: ledger.active_session.session_id, expected_currency: initial.config.currency });
   expect(refund.amount_minor).toBe('1275');
-  await page.reload();
+  await reloadRegister(page);
   await page.getByRole('button', { name: 'Sales history', exact: true }).click();
   await page.locator('.sale-row').filter({ hasText: original.receipt_number }).click();
   await expect(page.locator('.refund-status')).toContainText('Fully refunded');

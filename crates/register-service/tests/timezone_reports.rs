@@ -46,6 +46,8 @@ fn checkout(service: &mut RegisterService, key: &str, tender: &str) -> CheckoutI
     }];
     let quote = service.quote(&lines).unwrap();
     let input = CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         idempotency_key: key.into(),
         lines,
         tender_minor: tender.into(),

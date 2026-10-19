@@ -1,10 +1,11 @@
 import { test, expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { fixtureCommand, reloadRegister } from './fixture-command';
 
 // Real Rust + SQLite only. Route interception loses a response after commit;
 // it never substitutes mock application data. Run after blank-onboarding specs.
 const api = async (request: APIRequestContext, command: string, payload: unknown = {}) => {
-  const result = await (await request.post('/api/command', { data: { command, payload } })).json();
+  const result = await fixtureCommand(request, command, payload);
   expect(result.ok, JSON.stringify(result)).toBe(true);
   return result.data;
 };
@@ -111,7 +112,7 @@ test('valid preview cancels without writes then applies mixed products on mobile
   expect(find('CSV-OMITTED')).toEqual(before.config.catalog.find((item: { sku: string }) => item.sku === 'CSV-OMITTED'));
   expect(saved.config.groups).toEqual(before.config.groups);
   expect(saved.draft).toEqual(before.draft);
-  await page.reload();
+  await reloadRegister(page);
   expect((await api(request, 'get_state')).config).toEqual(saved.config);
 });
 

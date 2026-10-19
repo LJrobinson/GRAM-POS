@@ -25,6 +25,8 @@ fn checkout(service: &RegisterService, key: &str) -> CheckoutInput {
     }];
     let quote = service.quote(&lines).unwrap();
     CheckoutInput {
+        expected_draft_id: None,
+        expected_draft_revision: None,
         expected_session_id: None,
         expected_currency: None,
         idempotency_key: key.into(),

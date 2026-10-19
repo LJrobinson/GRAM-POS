@@ -4,6 +4,14 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Park a cart and return to it (milestone 9)
+
+Version **0.9.0** adds durable local parked carts. Save a nonempty cart with an optional short, nonpersonal label, continue another sale, then preview and resume the saved quantities. The preview uses **current catalog and prices**, not a promise to hold a price. Measured grams, package counts and unit counts remain separate; unavailable products and changed product types are flagged rather than silently removed or reinterpreted.
+
+Resume never overwrites a nonempty active cart. Park it first, or explicitly clear it. Parked-cart discard requires confirmation. Saving, parking and resuming use durable identity, revision checks and retry keys; checkout consumes the active identity in the same SQLite transaction as the receipt. Parking does not create a sale, reserve stock, record cash or add customer records. See the [parked-cart guide](docs/parked-carts.md) and [backup/recovery guide](docs/backup.md).
+
+Desktop and phone screenshot scenarios are included in the real-Rust browser suite. New milestone-9 screenshots will be published only after CI execution and visual inspection; the captures below retain their original milestone labels.
+
 ## Store identity and local business days (milestone 8)
 
 Version **0.8.0** adds a revision-checked **Store settings** editor with an explicit receipt preview, Save and Cancel. Configure the store display name and optional plain-text header, contact and footer without changing currency or pricing. New receipts retain the saved identity; existing receipt bytes and legacy printing are unchanged. Training warnings cannot be removed.
@@ -240,7 +248,7 @@ Version **0.4.0** adds a training-only cash ledger without rewriting any sale:
 
 Sessions snapshot currency and precision. Close the session before changing currency; refunds must match the active session's currency and precision. Old receipts without a session stay visible as legacy history and are never added to a new drawer's sales. Partial refunds, cash pay-ins/pay-outs, live payment refunds, inventory adjustments, user authentication, taxes, synchronization, and production/fiscal certification are not implemented.
 
-The service explicitly migrates schema 1 stores to schema 2 while leaving their receipt/request bytes intact. The recovery tool accepts older v1 backups as legacy history and new v2 backups with the cash ledger. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
+The service explicitly migrates recognized schema 1/2 stores to schema 3 while leaving their receipt/request bytes intact. The recovery tool accepts older v1/v2 backups and v3 backups containing durable draft identity, parked carts and recovery keys. Back up before upgrading; do not reopen an upgraded store with an older app. See [cash-session workflow](docs/cash-sessions.md) and [backup and recovery](docs/backup.md).
 
 The earlier register/catalog/cash-session screenshots are original milestone-4 browser captures; the receipt/report section is labeled milestone 5. Current verification status is recorded in [VALIDATION.md](VALIDATION.md).
 
