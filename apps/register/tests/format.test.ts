@@ -50,3 +50,8 @@ test('quantity display preserves original recorded measured input', () => {
 test('prepack display does not claim a measured weight', () => {
   assert.equal(quantityLabel({ kind: 'prepacked', count: '2' }, '3.500'), '2 × 3.500 g declared');
 });
+
+test('unit counts are not package content or fictional measured grams', () => {
+  assert.equal(quantityLabel({ kind: 'unit', count: '1' }, null), '1 unit');
+  assert.equal(quantityLabel({ kind: 'unit', count: '9007199254740993' }, null), '9007199254740993 units');
+});

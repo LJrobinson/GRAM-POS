@@ -89,6 +89,17 @@ The print layout contains only the selected original receipt, not register contr
 
 </details>
 
+## Milestone 6: ordinary units and keyboard barcodes
+
+Version **0.6.0** adds ordinary **Unit / each** products alongside measured goods and prepackages:
+
+- Set a price per item and sell a positive whole-number count, with exact Rust money arithmetic. Unit products have no declared gram content and never join weight-pricing groups.
+- Assign one optional barcode per product. Codes are exact, case-sensitive strings, so leading zeroes are preserved. A code remains reserved while its product is archived; duplicates are rejected rather than guessed.
+- Focus the dedicated barcode field, scan with a keyboard-style HID scanner, or type the code and press Enter. Count products add one item; measured products open the weight-entry prompt. Unknown and archived codes report an error.
+- Preserve the original quantity and price in saved receipts, refunds, reports and portable backups. Old measured/prepack records and older supported backups remain readable.
+
+This is keyboard text entry, not a scanner driver: no camera, device permission, global key listener, inventory, stock adjustment or synchronization is added. See [unit products and barcodes](docs/units-and-barcodes.md) for validation, retry and compatibility details. Existing screenshots above retain their milestone labels; milestone-6 browser/native runtime evidence is tracked in [VALIDATION.md](VALIDATION.md).
+
 ## Milestone 5: printable receipts and date-filtered reports
 
 Version **0.5.0** adds a focused, read-only view of the saved record:

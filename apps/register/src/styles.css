@@ -22,3 +22,10 @@
 .refund-status p { font-size:12px; color:#66756b; }
 .settings-card summary { cursor:pointer; min-height:48px; line-height:1.6; overflow-wrap:anywhere; }
 @media(max-width:600px) { .drawer-status { align-items:stretch; flex-direction:column; } .ledger-totals > div { gap:10px; } }
+
+.barcode-scanner { margin: 18px 0; padding: 14px; border: 1px solid var(--border, #dce4df); border-radius: 12px; }
+.barcode-scanner label { display: block; font-weight: 600; margin-bottom: 8px; }
+.barcode-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.barcode-controls input { flex: 1; min-width: 180px; padding: 11px; border: 1px solid #bdccc4; border-radius: 8px; }
+.barcode-controls input:focus { outline: 2px solid #197353; outline-offset: 2px; }
+.barcode-scanner .input-help { margin-bottom: 0; }

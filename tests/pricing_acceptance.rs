@@ -992,3 +992,129 @@ fn deterministic_randomized_splits_order_and_allocation_invariants() {
         }
     }
 }
+
+fn unit(id: &str, count: u64, minor_units: u64) -> CartLine {
+    CartLine {
+        id: id.into(),
+        sku: "individual-item".into(),
+        quantity: Quantity::Unit { count },
+        pricing: LinePricing::FixedUnit {
+            unit_price: money(minor_units),
+        },
+    }
+}
+
+#[test]
+fn units_price_exact_integer_counts_without_any_weight() {
+    let line = unit("unit", 3, 249);
+    let result = price_cart(std::slice::from_ref(&line), &[]).unwrap();
+    assert_eq!(result.total, money(747));
+    assert!(result.groups.is_empty());
+    assert_eq!(result.lines[0].quantity, Quantity::Unit { count: 3 });
+    assert_eq!(result.lines[0].quantity, line.quantity);
+    assert_eq!(
+        result.lines[0].explanation,
+        LineExplanation::FixedUnit {
+            unit_price: money(249),
+            count: 3,
+        }
+    );
+}
+
+#[test]
+fn unit_counts_are_positive_and_support_full_u64_range() {
+    assert_eq!(
+        price_cart(&[unit("zero", 0, 100)], &[]),
+        Err(PricingError::NonPositiveInput("unit count"))
+    );
+    let largest_count = price_cart(&[unit("largest", u64::MAX, 1)], &[]).unwrap();
+    assert_eq!(largest_count.total.minor_units, u64::MAX);
+    assert_eq!(
+        largest_count.lines[0].quantity,
+        Quantity::Unit { count: u64::MAX }
+    );
+    // Free items still preserve their exact count without weight overflow.
+    let free = price_cart(&[unit("free", u64::MAX, 0)], &[]).unwrap();
+    assert_eq!(free.total.minor_units, 0);
+    assert!(free.groups.is_empty());
+}
+
+#[test]
+fn unit_count_multiplication_and_money_sum_are_checked() {
+    for (count, price) in [(u64::MAX, 2), (2, u64::MAX)] {
+        assert_eq!(
+            price_cart(&[unit("overflow", count, price)], &[]),
+            Err(PricingError::Overflow("pricing fixed unit count"))
+        );
+    }
+    assert_eq!(
+        price_cart(&[unit("maximum", 1, u64::MAX), unit("extra", 1, 1)], &[]),
+        Err(PricingError::Overflow("summing cart amount"))
+    );
+}
+
+#[test]
+fn units_reject_weight_group_pricing_even_as_the_only_group_member() {
+    let g = group("g", &[(1000, 0, 100)], OveragePolicy::FullActualAtTierRate);
+    let mut invalid = unit("unit", 1, 100);
+    invalid.pricing = LinePricing::WeightGroup {
+        group_id: "g".into(),
+    };
+    assert_eq!(
+        price_cart(std::slice::from_ref(&invalid), std::slice::from_ref(&g)),
+        Err(PricingError::UnsupportedQuantityPricing)
+    );
+    assert_eq!(
+        price_cart(&[measured("measured", "bulk", 1000, "g"), invalid], &[g]),
+        Err(PricingError::UnsupportedQuantityPricing)
+    );
+}
+
+#[test]
+fn unit_lines_do_not_affect_weight_group_totals_or_allocations() {
+    let g = group("g", &[(1000, 0, 100)], OveragePolicy::FullActualAtTierRate);
+    let weighted = vec![
+        measured("a", "bulk-a", 600, "g"),
+        prepack(
+            "b",
+            2,
+            200,
+            LinePricing::WeightGroup {
+                group_id: "g".into(),
+            },
+        ),
+    ];
+    let baseline = price_cart(&weighted, std::slice::from_ref(&g)).unwrap();
+    let mut mixed = weighted;
+    mixed.push(unit("c", 4, 250));
+    let result = price_cart(&mixed, &[g]).unwrap();
+    assert_eq!(result.groups, baseline.groups);
+    assert_eq!(&result.lines[..2], baseline.lines.as_slice());
+    assert_eq!(result.total, money(baseline.total.minor_units + 1000));
+    assert_eq!(result.groups[0].actual_measured_weight, weight(600));
+    assert_eq!(result.groups[0].declared_package_weight, weight(400));
+}
+
+#[test]
+fn units_still_require_valid_identifiers_and_consistent_currency() {
+    let mut invalid = unit("", 1, 100);
+    assert_eq!(
+        price_cart(std::slice::from_ref(&invalid), &[]),
+        Err(PricingError::InvalidIdentifier("cart line id"))
+    );
+    invalid.id = "id".into();
+    invalid.sku = " ".into();
+    assert_eq!(
+        price_cart(&[invalid], &[]),
+        Err(PricingError::InvalidIdentifier("SKU"))
+    );
+    let a = unit("a", 1, 100);
+    let mut b = unit("b", 1, 100);
+    b.pricing = LinePricing::FixedUnit {
+        unit_price: Money::new(Currency::new("EUR", 2).unwrap(), 100),
+    };
+    assert_eq!(
+        price_cart(&[a, b], &[]),
+        Err(PricingError::CurrencyMismatch)
+    );
+}

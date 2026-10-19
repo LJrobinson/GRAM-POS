@@ -149,3 +149,13 @@ test('print/cancel/reprint makes no record changes and propagates dialog failure
   assert.throws(() => printSavedReceipt(receipt.sale_id, host), /Print dialog unavailable/);
   assert.equal(JSON.stringify(receipt), before);
 });
+
+test('saved unit receipts preserve count and exact unit price without a weight', () => {
+  const receipt = savedReceipt();
+  receipt.quote.lines = [{ id: 'unit', sku: 'SOAP', name: 'Original soap', quantity: { kind: 'unit', count: '3' }, declared_content_grams: null, amount_minor: '375', explanation: { kind: 'fixed_unit', count: '3', unit_price_minor: '125' } }];
+  receipt.quote.groups = [];
+  const view = receiptView(freezeDeep(receipt));
+  assert.deepEqual(view.lines, [{ id: 'unit', sku: 'SOAP', name: 'Original soap', quantity: '3 units', amount: '$3.75', unitPrice: '$1.25' }]);
+  assert.deepEqual(view.groups, []);
+  assert.deepEqual(receiptView(JSON.parse(JSON.stringify(receipt))), view);
+});

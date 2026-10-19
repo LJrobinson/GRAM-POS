@@ -1,3 +1,31 @@
+# Milestone 6 validation
+
+Implemented from merged main `d9792d757a9118534581ea0ed1979235bbe6d3bc` on 2026-10-19. All 85 tracked local blobs, including binary screenshots, were verified against the recursive remote Git tree before edits; no divergent files were overwritten. App version is 0.6.0. SQLite schema 2, configuration schema 1 and accepted portable backup formats are unchanged.
+
+## Scope and regression coverage
+
+True unit products use positive integer counts and checked fixed-unit money, without declared grams or weight-group eligibility. One optional exact barcode per catalog item preserves leading zeros and is unique across active and archived products. Existing receipt/request bytes and legacy backup/migration paths remain intact. Rust coverage includes unit overflow, incompatible quantities/pricing, unit-plus-measured carts, barcode UTF-8 limits/control characters/duplicates/exact lookup, old missing fields, draft/backup/retry round trips, immutable unit refunds and event-date report totals after product edits and archive.
+
+Frontend coverage checks count/receipt labels and serialized scanner work, deliberate repeated submissions, exact identity, error/retry, measured prompts, stale revisions and cancellation. Real-Rust browser tests include delayed responses on navigation/cancel/cart clear, unknown/archived codes, focused keyboard input, unit checkout/refund snapshots and desktop/phone capture paths.
+
+## Local verification
+
+- Rust stable 1.99.1 `cargo test --workspace --all-targets --all-features --locked`: **111 tests passed** (49 core, 62 service), including the old migration and backup suites.
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- Workspace documentation tests and the pricing-demo example: passed (no doctest cases).
+- Native host formatting and locked no-dependency Cargo metadata: passed. Native Rust runtime tests/build were not executed locally.
+- Frontend `npm run typecheck`, `npm test` (**52 tests**) and `npm run build`: passed for version 0.6.0.
+- Strict standalone TypeScript compilation of the new browser spec: passed.
+- `npx playwright test --list`: **9 scenarios discovered**, including 4 new unit/barcode scenarios; not runtime execution.
+- Independent read-only review found a delayed-scan/cart-clear race; the fix now invalidates pending and queued work synchronously on Clear, navigation, manual selection and checkout. Two unit regressions and controlled delayed-response E2E coverage were added. Ordinary queued repeated scans remain valid. No outstanding concrete review finding remained at freeze.
+
+## Runtime evidence boundary
+
+No milestone-6 browser runtime, new screenshots, native Windows runtime or physical scanner pass is claimed locally. Chromium socket execution and native GTK/GObject dependencies remain blocked in this environment; denied escalation was not repeated. Existing README screenshots retain their original milestone-4/5 labels. Playwright discovery only proves test discovery, not execution. CI must run the real Rust/browser suite and native Windows checks/unsigned package for the published commit before merge. Actual keyboard scanner configuration/timing and native peripheral use remain unverified even if browser CI passes.
+
+---
+
 # Milestone 5 validation
 
 Implemented from merged main `82d3e2ae773a591d4c253764be81215f5687d9df` on 2026-10-18. All 68 tracked local blobs were verified byte-for-byte against that Git tree before editing; no divergent user files were overwritten. App version is 0.5.0. The SQLite schema and backup/recovery formats are unchanged.
