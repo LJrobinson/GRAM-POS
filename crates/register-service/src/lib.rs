@@ -72,6 +72,11 @@ struct InitializeInput {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct BarcodeInput {
+    barcode: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReceiptInput {
     sale_id: String,
 }
@@ -186,6 +191,10 @@ impl RegisterService {
                 validate_id(&input.idempotency_key, "Refund key")?;
                 Ok(json!({"refund":self.refund_by_key(&input.idempotency_key)?}))
             }
+            "lookup_barcode" => {
+                let input: BarcodeInput = decode(payload)?;
+                encode(self.lookup_barcode(&input.barcode)?)
+            }
             "get_state" => {
                 let _: EmptyInput = decode(payload)?;
                 encode(self.state()?)
@@ -279,6 +288,30 @@ impl RegisterService {
         };
         tx.commit()?;
         Ok(result)
+    }
+
+    /// Exact, case-sensitive catalog lookup. Does not mutate the cart or coerce identifiers.
+    pub fn lookup_barcode(&self, barcode: &str) -> Result<BarcodeLookup, ServiceError> {
+        validate_id(barcode, "Barcode")?;
+        let (revision, config) = read_config(&self.conn)?;
+        validate_config(&config)?;
+        let item = config
+            .catalog
+            .into_iter()
+            .find(|item| item.barcode.as_deref() == Some(barcode))
+            .ok_or_else(|| {
+                ServiceError::new("UNKNOWN_BARCODE", "No product has this exact barcode.")
+            })?;
+        if item.archived {
+            return Err(ServiceError::new(
+                "ARCHIVED_PRODUCT",
+                "This barcode belongs to an archived product. Unarchive it before selling.",
+            ));
+        }
+        Ok(BarcodeLookup {
+            item,
+            config_revision: revision.to_string(),
+        })
     }
 
     pub fn initialize_demo(&mut self) -> Result<State, ServiceError> {
@@ -597,7 +630,7 @@ fn validate_draft(lines: &[CartInputLine]) -> Result<(), ServiceError> {
         }
         let text = match &line.quantity {
             InputQuantity::Measured { grams } => grams,
-            InputQuantity::Prepacked { count } => count,
+            InputQuantity::Prepacked { count } | InputQuantity::Unit { count } => count,
         };
         if text.len() > 32 || text.chars().any(char::is_control) {
             return Err(ServiceError::new(
@@ -720,6 +753,7 @@ fn validate_config_inner(config: &Config) -> Result<(), ServiceError> {
         group_to_core(group, cur)?;
     }
     let mut skus = BTreeSet::new();
+    let mut barcodes = BTreeSet::new();
     for item in &config.catalog {
         validate_id(&item.sku, "SKU")?;
         validate_id(&item.name, "Product name")?;
@@ -729,16 +763,31 @@ fn validate_config_inner(config: &Config) -> Result<(), ServiceError> {
                 "Catalog SKUs must be unique.",
             ));
         }
+        if let Some(barcode) = &item.barcode {
+            validate_id(barcode, "Barcode")?;
+            if !barcodes.insert(barcode) {
+                return Err(ServiceError::new(
+                    "INVALID_CONFIG",
+                    "Barcodes must be unique across active and archived products.",
+                ));
+            }
+        }
         match item.kind.as_str() {
-            "measured" if item.declared_content_grams.is_none() => {},
+            "measured" | "unit" if item.declared_content_grams.is_none() => {},
             "prepacked" => {
                 let declared = item.declared_content_grams.as_deref().ok_or_else(|| ServiceError::new("INVALID_CONFIG","A prepack needs declared content grams."))?;
                 if core::Weight::from_grams_str(declared)? == core::Weight::ZERO { return Err(ServiceError::new("INVALID_CONFIG","Declared package content must be positive.")); }
             },
-            _ => return Err(ServiceError::new("INVALID_CONFIG","Product kind must be measured or prepacked; measured products cannot have declared package content.")),
+            _ => return Err(ServiceError::new("INVALID_CONFIG","Product kind must be measured, prepacked or unit; only prepacked products may have declared package content.")),
         }
         match &item.pricing {
             CatalogPricing::WeightGroup { group_id } => {
+                if item.kind == "unit" {
+                    return Err(ServiceError::new(
+                        "INVALID_CONFIG",
+                        "Unit products must use fixed unit pricing and cannot join weight groups.",
+                    ));
+                }
                 if !groups.contains(group_id.as_str()) {
                     return Err(ServiceError::new(
                         "INVALID_CONFIG",
@@ -747,10 +796,10 @@ fn validate_config_inner(config: &Config) -> Result<(), ServiceError> {
                 }
             }
             CatalogPricing::FixedUnit { unit_price_minor } => {
-                if item.kind != "prepacked" {
+                if item.kind != "prepacked" && item.kind != "unit" {
                     return Err(ServiceError::new(
                         "INVALID_CONFIG",
-                        "Only prepackages can use fixed unit prices.",
+                        "Only prepacked and unit products can use fixed unit prices.",
                     ));
                 }
                 core::Money::from_minor_str(cur, unit_price_minor)?;
@@ -801,6 +850,9 @@ fn quote_using_config(
                     actual_weight: core::Weight::from_grams_str(grams)?,
                 }
             }
+            InputQuantity::Unit { count } if item.kind == "unit" => core::Quantity::Unit {
+                count: parse_integer(count, "Unit count")?,
+            },
             InputQuantity::Prepacked { count } if item.kind == "prepacked" => {
                 core::Quantity::Prepacked {
                     count: parse_integer(count, "Package count")?,
@@ -953,6 +1005,7 @@ pub fn demo_config() -> Config {
         }],
         catalog: vec![
             CatalogItem {
+                barcode: None,
                 archived: false,
                 sku: "bulk-a".into(),
                 name: "Demo Bulk A".into(),
@@ -963,6 +1016,7 @@ pub fn demo_config() -> Config {
                 },
             },
             CatalogItem {
+                barcode: None,
                 archived: false,
                 sku: "bulk-b".into(),
                 name: "Demo Bulk B".into(),
@@ -973,6 +1027,7 @@ pub fn demo_config() -> Config {
                 },
             },
             CatalogItem {
+                barcode: None,
                 archived: false,
                 sku: "prepack-mix".into(),
                 name: "Demo 3.5 g Mix Pack".into(),
@@ -983,6 +1038,7 @@ pub fn demo_config() -> Config {
                 },
             },
             CatalogItem {
+                barcode: None,
                 archived: false,
                 sku: "prepack-fixed".into(),
                 name: "Demo 3.5 g Fixed Pack".into(),

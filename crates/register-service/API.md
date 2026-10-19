@@ -1,6 +1,6 @@
-# GRAM register service: milestone 4
+# GRAM register service: milestone 6
 
-`gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to the unchanged `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
+`gram-register-service` is a transport-neutral, local SQLite service. It delegates every selling-price calculation and allocation to `gram-pos-core`. Its cash workflow records a manual cash tender; it does not process a payment or verify that physical cash changed hands.
 
 This release is explicitly **demo only**. Fixtures and editable pricing policies are illustrative, not merchant defaults. No tax is calculated. There is no production tax engine, payment processor, inventory movement, partial refunds, user/role system, synchronization, fiscal certification, or printer integration. Do not use demo receipts for live trade.
 
@@ -21,7 +21,7 @@ let state = register.handle("get_state", json!({}))?;
 
 ## Exact JSON numbers
 
-Money (minor units), package counts, config revisions, sale IDs, Unix timestamps, allocation remainders, and rational numerators/denominators are decimal **strings**. Weight is a decimal grams **string** with at most three fractional digits, parsed directly by the core into integer milligrams. No floating-point value participates in a quote, checkout, or saved receipt. Small enum versions, currency exponents, and line counts are JSON numbers.
+Money (minor units), package and unit counts, config revisions, sale IDs, Unix timestamps, allocation remainders, and rational numerators/denominators are decimal **strings**. Weight is a decimal grams **string** with at most three fractional digits, parsed directly by the core into integer milligrams. No floating-point value participates in a quote, checkout, or saved receipt. Small enum versions, currency exponents, and line counts are JSON numbers.
 
 ```json
 {
@@ -44,6 +44,7 @@ Use stable, unique line IDs. Catalog SKU determines kind, declared package conte
 | `put_config` | `{config: Config,expected_config_revision:"1"}` | State, after complete validation and revision increment; stale revision fails `STALE_CONFIG` |
 | `export_sales` | `{}` | `{filename,media_type,content}` with versioned full receipt JSON |
 | `export_backup` | `{}` | `{filename,media_type,content}` with consistent logical backup JSON |
+| `lookup_barcode` | `{barcode:"001234"}` | `{item: CatalogItem,config_revision:"1"}`; exact active match, otherwise `UNKNOWN_BARCODE` / `ARCHIVED_PRODUCT` |
 | `quote_cart` | `{lines: CartInputLine[]}` | `Quote` from the Rust core |
 | `save_draft` | `{lines: CartInputLine[]}` | `{saved:true}` |
 | `complete_cash_sale` | Checkout below | `Receipt` |
@@ -70,6 +71,14 @@ Finalization begins a SQLite immediate transaction, checks for replay, loads the
 Errors `INVALID_INPUT`, `INVALID_CONFIG`, `NOT_CONFIGURED`, `INSUFFICIENT_TENDER`, `STALE_QUOTE`, and `PRICE_ERROR` insert no new sale in that attempt. An interrupted transport or `STORAGE_ERROR` should be reconciled by retrying **the exact same key and payload**, or querying `get_sale_by_key`. A key conflict indicates an already-used key; retrieve its original receipt rather than assuming no sale exists.
 
 Drafts can contain incomplete quantity text for interrupted typing, but must have valid bounded IDs and supported DTO shapes. Draft recovery is not a quote. Saving configuration can make a recovered draft require correction. Checkout clears the saved draft atomically; host/frontends must serialize autosave and checkout, and not submit delayed old autosaves after a successful sale.
+
+## Unit products and exact barcodes
+
+A true unit product has `kind:"unit"`, `declared_content_grams:null` (or omitted), and `pricing:{kind:"fixed_unit",unit_price_minor:"125"}`. Its cart quantity is `{kind:"unit",count:"2"}`. Count is a positive u64 decimal string; multiplication and cart totals are checked for overflow. Unlike a prepack, it has no declared weight and cannot be assigned to a weight group, even when it is the group's only product. Unit lines use the existing fixed-unit explanation and never contribute to group eligible grams or tolerance. Measured and prepacked rules remain unchanged.
+
+Every catalog kind may optionally have one `barcode` string. Missing/null means no barcode; serialization omits absent values, so legacy configurations, receipts, and backups retain their shape. Barcodes are exact case-sensitive identifiers, never numbers: leading zeros are significant. Valid barcodes have 1–128 UTF-8 bytes, no surrounding whitespace, and no Unicode control characters. No trimming, numeric coercion, case folding, prefix matching, or check-digit normalization occurs. Duplicates are rejected across both active and archived products. Lookup never falls back to SKU or name, never mutates a draft, and rejects archived products rather than silently selling them. The lookup response includes the revision of the same configuration read, allowing clients to reject stale scan results. Invalid barcode payloads return `INVALID_INPUT`; an unconfigured register returns `NOT_CONFIGURED`.
+
+These are additive DTO changes, not a database migration. SQLite stays schema version 2 and configuration stays schema version 1. Saved unit drafts, receipt snapshots, and logical backups preserve unit counts and optional barcodes; historical receipts are not repriced after catalog edits.
 
 ## Settings
 

@@ -216,3 +216,11 @@ or external publication is part of these acceptance results.
 - Server-generated CSV uses fixed columns and filename, RFC-style quoting and CRLF rows, Unicode preservation, spreadsheet formula-prefix defense for refund reasons, and exact integer minor-unit text. Empty results produce the header only.
 - The report/CSV additions do not migrate schema, mutate receipts, change idempotency, or alter the existing backup/recovery format. Reports are not recovery files.
 - Rust report tests cover UTC boundaries and leap dates, refund-only periods, currency/precision groups, legacy/archive handling, totals beyond u64, malformed input, immutable recovery replay, corrupted records and CSV escaping/injection. Frontend/browser coverage and execution status are recorded in VALIDATION.md.
+
+## Milestone 6: ordinary units and focused barcode lookup
+
+- A unit line records only an integer count and exact fixed per-unit price; it neither manufactures declared grams nor joins a weight-pricing group. Zero/fractional/negative counts, unsupported quantity/pricing pairs and arithmetic overflow are rejected. Existing measured/prepacked vectors remain unchanged.
+- Optional single barcodes are exact case-sensitive strings with leading zeros retained. Duplicate codes across active/archived products, surrounding whitespace, controls and overlong codes fail atomic configuration validation. Unknown and archived lookup errors do not add a line.
+- Only the focused scanner field submits on Enter. Count-item scans add one item/package; measured scans request weight. Repeated deliberate scans are distinct, asynchronous lookups are serialized, and cancellation/navigation prevents late results from changing a different screen or cart context.
+- Saved unit receipts, full-sale refunds and report totals use the original immutable money and quantity snapshots after product edits. Older configs without barcodes and measured/prepacked receipt/backup records remain valid; recovery preserves original raw records and retry identities.
+- Browser tests capture actual unit/scanner desktop and phone states. Test discovery is not runtime execution, and successful browser/native packaging does not certify physical HID scanners, printer/scales, device synchronization or production use. Check VALIDATION.md for what actually ran.

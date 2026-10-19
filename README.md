@@ -89,6 +89,59 @@ The print layout contains only the selected original receipt, not register contr
 
 </details>
 
+### Unit products and focused barcode scanning (milestone 6)
+
+These original captures come from the [passing milestone-6 real-browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39184353224/job/117843819615) for PR head `36b2428`. All nine scenarios passed using the real Rust service and SQLite, including delayed-scan cancellation and repeated scans. Training fixtures include intentionally extreme currency values from the exact-arithmetic tests; they are not real business records or hardware certification.
+
+<details>
+<summary>View two deliberate unit scans and their exact total</summary>
+
+The focused barcode field added two separate one-unit lines at $4.25 each, totaling $8.50, without declared grams.
+
+![GRAM focused barcode field with two unit-count cart lines and exact 8.50 total](docs/screenshots/unit-scanner-desktop.png)
+
+</details>
+
+<details>
+<summary>View the phone scanner and count-based cart</summary>
+
+![GRAM phone layout with a dedicated barcode field and whole-item cart quantities](docs/screenshots/unit-scanner-phone.png)
+
+</details>
+
+<details>
+<summary>View the unit-product editor and exact barcode</summary>
+
+A unit product has an exact barcode string and a price per item, with no declared gram content. These are original browser element captures, not reconstructed mockups.
+
+![GRAM unit product editor retaining leading zeros in its barcode with fixed per-unit pricing](docs/screenshots/unit-product-editor-desktop.png)
+
+![GRAM mobile unit product editor with no declared gram field](docs/screenshots/unit-product-editor-phone.png)
+
+</details>
+
+<details>
+<summary>View an immutable count-based receipt on desktop and phone</summary>
+
+Three units at $4.25 total $12.75, with $20.00 cash received and $7.25 change. The phone modal scrolls to its remaining refund/print controls. CI also verifies this original receipt remains unchanged after catalog edits and a full refund.
+
+![GRAM saved receipt with three units and exact original price, total, tender and change](docs/screenshots/unit-receipt-desktop.png)
+
+![GRAM phone receipt showing unit count and exact money without fictional weight](docs/screenshots/unit-receipt-phone.png)
+
+</details>
+
+## Milestone 6: ordinary units and keyboard barcodes
+
+Version **0.6.0** adds ordinary **Unit / each** products alongside measured goods and prepackages:
+
+- Set a price per item and sell a positive whole-number count, with exact Rust money arithmetic. Unit products have no declared gram content and never join weight-pricing groups.
+- Assign one optional barcode per product. Codes are exact, case-sensitive strings, so leading zeroes are preserved. A code remains reserved while its product is archived; duplicates are rejected rather than guessed.
+- Focus the dedicated barcode field, scan with a keyboard-style HID scanner, or type the code and press Enter. Count products add one item; measured products open the weight-entry prompt. Unknown and archived codes report an error.
+- Preserve the original quantity and price in saved receipts, refunds, reports and portable backups. Old measured/prepack records and older supported backups remain readable.
+
+This is keyboard text entry, not a scanner driver: no camera, device permission, global key listener, inventory, stock adjustment or synchronization is added. See [unit products and barcodes](docs/units-and-barcodes.md) for validation, retry and compatibility details. Screenshots above retain their milestone labels; milestone-6 browser/native runtime evidence is tracked in [VALIDATION.md](VALIDATION.md).
+
 ## Milestone 5: printable receipts and date-filtered reports
 
 Version **0.5.0** adds a focused, read-only view of the saved record:

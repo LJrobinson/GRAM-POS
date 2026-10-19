@@ -516,6 +516,7 @@ fn empty_catalog_can_be_built_and_archived_without_demo_seed() {
     assert!(service.initialize_demo().is_err());
     let mut config = initial.config.unwrap();
     config.catalog.push(CatalogItem {
+        barcode: None,
         archived: false,
         sku: "my-pack".into(),
         name: "My pack".into(),

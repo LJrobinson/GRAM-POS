@@ -84,6 +84,11 @@ pub struct PricingGroup {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Quantity {
+    /// A positive integer count of items with no measured or declared weight.
+    /// Only fixed unit pricing is supported; units never join weight groups.
+    Unit {
+        count: u64,
+    },
     Measured {
         actual_weight: Weight,
     },
@@ -98,7 +103,8 @@ pub enum LinePricing {
     /// Explicit eligibility in the named common-price group. For a prepack,
     /// its declared content times package count contributes, not measured mass.
     WeightGroup { group_id: String },
-    /// Excludes a prepack from weight offers and charges per physical package.
+    /// Charges per item for units or per physical package for prepackages.
+    /// Both are excluded from weight offers when using this pricing mode.
     /// Not valid for a measured-weight quantity.
     FixedUnit { unit_price: Money },
 }
@@ -152,7 +158,7 @@ pub enum LineExplanation {
 pub struct PricedLine {
     pub id: String,
     pub sku: String,
-    /// Original measured grams or original integer count + declared content.
+    /// Original unit count, measured grams, or package count + declared content.
     /// Pricing never normalizes or overwrites these recorded sale facts.
     pub quantity: Quantity,
     pub amount: Money,
@@ -228,10 +234,16 @@ pub fn price_cart(lines: &[CartLine], groups: &[PricingGroup]) -> Result<PricedC
         if seen_ids.insert(line.id.as_str(), ()).is_some() {
             return Err(PricingError::DuplicateLineId(line.id.clone()));
         }
-        let (weight, source) = match line.quantity {
+        let weight_contribution = match line.quantity {
+            Quantity::Unit { count } => {
+                if count == 0 {
+                    return Err(PricingError::NonPositiveInput("unit count"));
+                }
+                None
+            }
             Quantity::Measured { actual_weight } => {
                 positive_weight(actual_weight, "actual measured weight")?;
-                (actual_weight, WeightSource::ActualMeasured)
+                Some((actual_weight, WeightSource::ActualMeasured))
             }
             Quantity::Prepacked {
                 count,
@@ -241,14 +253,16 @@ pub fn price_cart(lines: &[CartLine], groups: &[PricingGroup]) -> Result<PricedC
                     return Err(PricingError::NonPositiveInput("package count"));
                 }
                 positive_weight(declared_content, "declared package content")?;
-                (
+                Some((
                     declared_content.checked_mul(count)?,
                     WeightSource::DeclaredPackageContent,
-                )
+                ))
             }
         };
         match &line.pricing {
             LinePricing::WeightGroup { group_id } => {
+                let (weight, source) =
+                    weight_contribution.ok_or(PricingError::UnsupportedQuantityPricing)?;
                 validate_id(group_id, "line pricing group id")?;
                 if !configured_groups.contains_key(group_id.as_str()) {
                     return Err(PricingError::UnknownGroup(group_id.clone()));
@@ -264,16 +278,20 @@ pub fn price_cart(lines: &[CartLine], groups: &[PricingGroup]) -> Result<PricedC
             }
             LinePricing::FixedUnit { unit_price } => {
                 let count = match line.quantity {
-                    Quantity::Prepacked { count, .. } => count,
+                    Quantity::Unit { count } | Quantity::Prepacked { count, .. } => count,
                     Quantity::Measured { .. } => {
                         return Err(PricingError::UnsupportedQuantityPricing)
                     }
                 };
                 set_currency(&mut currency, unit_price.currency)?;
-                let minor_units = unit_price
-                    .minor_units
-                    .checked_mul(count)
-                    .ok_or(PricingError::Overflow("pricing fixed package count"))?;
+                let minor_units =
+                    unit_price
+                        .minor_units
+                        .checked_mul(count)
+                        .ok_or(PricingError::Overflow(match line.quantity {
+                            Quantity::Unit { .. } => "pricing fixed unit count",
+                            _ => "pricing fixed package count",
+                        }))?;
                 priced_lines[index] = Some(PricedLine {
                     id: line.id.clone(),
                     sku: line.sku.clone(),

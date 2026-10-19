@@ -41,9 +41,17 @@ pub struct CatalogItem {
     pub archived: bool,
     pub sku: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub barcode: Option<String>,
     pub kind: String,
     pub declared_content_grams: Option<String>,
     pub pricing: CatalogPricing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BarcodeLookup {
+    pub item: CatalogItem,
+    pub config_revision: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +70,7 @@ pub struct Config {
 pub enum InputQuantity {
     Measured { grams: String },
     Prepacked { count: String },
+    Unit { count: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

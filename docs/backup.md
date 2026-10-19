@@ -120,3 +120,7 @@ receipt or request bytes. Old sales stay unassigned, not cash movements in the
 next opened drawer. Do not open a schema-2 database with an older app; retain a
 pre-upgrade backup separately. New backups include the whole ledger and cannot
 be imported by milestone-3 binaries.
+
+## Version 0.6.0 quantity compatibility
+
+Unit-product receipts preserve the `unit` quantity tag and exact count with no invented gram content. Optional catalog barcodes are preserved in configuration snapshots and backups. Older configurations without barcodes and existing measured/prepacked receipts remain valid; this feature does not change SQLite schema 2 or the supported v1/v2 portable formats. New unit records require 0.6.0 or newer, so do not downgrade an active store. Original request and receipt JSON bytes are retained, not regenerated from the new catalog.

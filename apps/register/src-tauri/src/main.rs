@@ -191,6 +191,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn keyboard_barcode_uses_existing_bounded_dispatch() {
+        let service = Arc::new(Mutex::new(RegisterService::in_memory().unwrap()));
+        let state = dispatch(&service, "initialize_demo", serde_json::json!({})).unwrap();
+        let mut config = state["config"].clone();
+        config["catalog"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "sku": "NATIVE-UNIT", "name": "Accessory", "kind": "unit",
+                "declared_content_grams": null, "barcode": "00123",
+                "pricing": { "kind": "fixed_unit", "unit_price_minor": "250" }
+            }));
+        let saved = dispatch(
+            &service,
+            "put_config",
+            serde_json::json!({
+                "config": config, "expected_config_revision": state["config_revision"]
+            }),
+        )
+        .unwrap();
+        let found = dispatch(
+            &service,
+            "lookup_barcode",
+            serde_json::json!({"barcode":"00123"}),
+        )
+        .unwrap();
+        assert_eq!(found["item"]["sku"], "NATIVE-UNIT");
+        assert_eq!(found["config_revision"], saved["config_revision"]);
+        assert_eq!(
+            dispatch(
+                &service,
+                "lookup_barcode",
+                serde_json::json!({"barcode":"123"})
+            )
+            .unwrap_err()
+            .code,
+            "UNKNOWN_BARCODE"
+        );
+        assert_eq!(
+            dispatch(
+                &service,
+                "lookup_barcode",
+                serde_json::json!({"barcode":"00123", "path":"ignored"})
+            )
+            .unwrap_err()
+            .code,
+            "INVALID_INPUT"
+        );
+        let quote = dispatch(
+            &service,
+            "quote_cart",
+            serde_json::json!({"lines":[{
+                "id":"unit-1", "sku":"NATIVE-UNIT", "quantity":{"kind":"unit","count":"2"}
+            }]}),
+        )
+        .unwrap();
+        assert_eq!(quote["total_minor"], "500");
+        assert_eq!(quote["groups"], serde_json::json!([]));
+        assert!(quote["lines"][0]["declared_content_grams"].is_null());
+    }
+
+    #[test]
     fn report_exports_require_fixed_kind_and_validated_dates() {
         let service = RegisterService::in_memory().unwrap();
         assert_eq!(

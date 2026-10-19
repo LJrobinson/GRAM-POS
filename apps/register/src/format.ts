@@ -26,7 +26,7 @@ export function minorToInput(value: string, exponent = 2): string {
 export function validGrams(value: string): boolean { return /^(?:0|[1-9]\d*)(?:\.\d{1,3})?$/.test(value) && /[1-9]/.test(value); }
 export function validCount(value: string): boolean { return /^[1-9]\d*$/.test(value); }
 export function quantityLabel(quantity: Quantity, declared?: string | null): string {
-  return quantity.kind === 'measured' ? `${quantity.grams} g measured` : `${quantity.count} × ${declared || '—'} g declared`;
+  return quantity.kind === 'unit' ? `${quantity.count} ${quantity.count === '1' ? 'unit' : 'units'}` : quantity.kind === 'measured' ? `${quantity.grams} g measured` : `${quantity.count} × ${declared || '—'} g declared`;
 }
 export function dateTime(unix: string): string { return new Date(Number(unix) * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
 export const ruleNames: Record<string, string> = {

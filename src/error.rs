@@ -39,7 +39,7 @@ impl fmt::Display for PricingError {
             Self::CurrencyMismatch => write!(f, "all prices in a cart must have the same currency and minor-unit exponent"),
             Self::UnorderedTiers => write!(f, "nominal tier weights must be strictly increasing"),
             Self::OverlappingToleranceBands => write!(f, "inclusive nominal-to-upper-tolerance bands must not overlap or touch"),
-            Self::UnsupportedQuantityPricing => write!(f, "fixed unit pricing requires prepacked integer quantities"),
+            Self::UnsupportedQuantityPricing => write!(f, "quantity and pricing are incompatible: units require fixed unit pricing, measured quantities require weight group pricing"),
             Self::BelowSmallestTier { group_id } => write!(f, "pricing group {group_id} is below its smallest allowed nominal tier"),
             Self::Overflow(operation) => write!(f, "arithmetic overflow while {operation}"),
         }

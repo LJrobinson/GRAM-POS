@@ -5,6 +5,8 @@
 //! every rounding, tolerance, under-minimum, and overage decision explicitly.
 //! No configuration implements a `Default` that silently chooses revenue policy.
 //!
+//! A [`Quantity::Unit`] preserves an integer item count with no weight and
+//! supports fixed unit pricing only, never weight-group participation.
 //! A [`Quantity::Measured`] preserves actual net mass. A [`Quantity::Prepacked`]
 //! preserves an integer package count and declared content, never claiming that
 //! declared content is a measured actual mass. Prepackages join a weight group
