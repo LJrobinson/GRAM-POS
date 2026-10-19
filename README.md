@@ -10,7 +10,40 @@ Version **0.9.0** adds durable local parked carts. Save a nonempty cart with an 
 
 Resume never overwrites a nonempty active cart. Park it first, or explicitly clear it. Parked-cart discard requires confirmation. Saving, parking and resuming use durable identity, revision checks and retry keys; checkout consumes the active identity in the same SQLite transaction as the receipt. Parking does not create a sale, reserve stock, record cash or add customer records. See the [parked-cart guide](docs/parked-carts.md) and [backup/recovery guide](docs/backup.md).
 
-Desktop and phone screenshot scenarios are included in the real-Rust browser suite. New milestone-9 screenshots will be published only after CI execution and visual inspection; the captures below retain their original milestone labels.
+These unmodified desktop and phone captures come from the [passing real-Rust browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39206584813/job/117911033610) at commit `85eb436`. All **37 browser scenarios** passed against Rust and SQLite. The Cedar Market products, labels and amounts are synthetic training fixtures, not customer data or real sales. Browser viewport checks are not physical-phone or native WebView2 certification.
+
+<details>
+<summary>Preview a parked mixed cart before resuming</summary>
+
+The saved cart keeps **3.621 g measured**, **2 packages** and **3 units** distinct. Its current quote is $30.87. Parking and previewing create no sale, cash movement or stock reservation; Resume is a separate action.
+
+![GRAM parked-cart desktop preview showing exact measured grams, package and unit counts with current total 30.87 dollars](docs/screenshots/parked-carts-preview-desktop.png)
+
+![GRAM phone parked-cart preview showing all three original quantities and separate Resume and Discard actions](docs/screenshots/parked-carts-preview-phone.png)
+
+</details>
+
+<details>
+<summary>Review current prices rather than assuming an old price is held</summary>
+
+The tote's current price and name have changed. The preview now quotes $33.12, explains the changes and requires review before Resume. Every original quantity remains unchanged.
+
+![GRAM parked-cart desktop current-price warning with 33.12 dollar quote and unchecked review confirmation](docs/screenshots/parked-cart-price-warning-desktop.png)
+
+![GRAM phone price-change warning showing preserved quantities, current total and disabled Resume until review](docs/screenshots/parked-cart-price-warning-phone.png)
+
+</details>
+
+<details>
+<summary>Keep missing, archived and changed-type products visible</summary>
+
+No invalid line is silently dropped or converted. This cart has no usable total until its issues are resolved; review and resume preserve the original lines, and checkout stays blocked. The long phone warning is vertically scrollable, with review controls below the captured view.
+
+![GRAM desktop parked-cart review showing missing, archived and changed-quantity-type warnings without a checkout quote](docs/screenshots/parked-cart-product-review-desktop.png)
+
+![GRAM phone product-review warnings retaining 3.621 measured grams, two packages and three units](docs/screenshots/parked-cart-product-review-phone.png)
+
+</details>
 
 ## Store identity and local business days (milestone 8)
 
