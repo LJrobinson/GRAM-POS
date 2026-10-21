@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { command } from './api';
 import { Icon } from './Icon';
 import { money } from './format';
-import { filterSales } from './history';
+import { filterSales } from './historySearch';
 import { createReportRequestGuard, reportDateTime } from './reports';
 import type { CashLedger } from './ledger';
 import type { Receipt, SaleSummary } from './types';

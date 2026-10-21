@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterSales } from '../src/history.ts';
+import { filterSales } from '../src/historySearch.ts';
 import { reportDateTime, createReportRequestGuard } from '../src/reports.ts';
 import type { SaleSummary } from '../src/types.ts';
 const sale = (sale_id: string, receipt_number: string): SaleSummary => ({ sale_id, receipt_number, created_at_unix: '0', total_minor: '9007199254740993', tender_minor: '9007199254740993', change_minor: '0', currency: { code: 'USD', minor_unit_exponent: 2 }, line_count: 1 });
