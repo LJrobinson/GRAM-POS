@@ -10,7 +10,51 @@ Version **0.11.0** adds a read-only search to Sales history. Find any saved sale
 
 History timestamps explicitly use the configured **store timezone**, including on narrow screens. Opening a result still reads the same immutable receipt; its original saved timezone and details do not change. A pending receipt response is ignored after a newer search, refresh or navigation. This adds no database migration, transaction type, stock behavior or production/compliance claim. See [receipts and reports](docs/receipts-and-reports.md) for details.
 
-Milestone-11 real-service browser verification and new screenshots are pending; the earlier verified captures below keep their original milestone labels. See [validation status](VALIDATION.md).
+These unmodified desktop and phone captures come from the [passing real-Rust browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39593291516/job/119199966123) for source commit `8785d0c`. All **53 browser scenarios** passed against Rust and SQLite, including six receipt-search scenarios. Cedar Market receipts are synthetic training fixtures, not real transactions. Browser viewport checks do not certify native WebView2, physical phones or printer hardware. See [validation status](VALIDATION.md).
+
+<details>
+<summary>Find an older receipt without losing its exact identity</summary>
+
+The lowercase query finds **1 of 111 saved sales**, including a receipt older than 101 subsequent sales. Receipt `DEMO-00000010`, sale ID `10`, and its $4.25 total stay distinct. Both layouts show the configured **Asia/Tokyo** time and UTC offset, even though the browser runs in Honolulu.
+
+![GRAM desktop history search finding one of 111 saved receipts with exact sale ID, total and Tokyo timestamp](docs/screenshots/receipt-search-match-desktop.png)
+
+![GRAM phone receipt search showing the matching count, clear action and explicit Tokyo timestamp without horizontal scrolling](docs/screenshots/receipt-search-match-phone.png)
+
+</details>
+
+<details>
+<summary>Distinguish no matches from an empty history</summary>
+
+Product names are deliberately not search fields. Searching for “Market tote” shows **0 of 111 saved sales**, with Clear search and Show all saved sales still available. No saved record has been deleted.
+
+![GRAM desktop no-match state with zero of 111 saved sales and a show-all action](docs/screenshots/receipt-search-no-match-desktop.png)
+
+![GRAM phone no-match state keeping search help and the show-all action readable](docs/screenshots/receipt-search-no-match-phone.png)
+
+</details>
+
+<details>
+<summary>Open the original receipt after later catalog and store edits</summary>
+
+The selected receipt retains **Cedar Market**, its original product name, **2 units at $4.25**, an **$8.50** total and its original **UTC** timestamp, although the current store name, product price and history timezone have changed. The receipt dialog scrolls vertically to its remaining controls, including on the phone.
+
+![GRAM original saved receipt preserving original Cedar Market branding, two units, 8.50 total and UTC timestamp](docs/screenshots/receipt-search-original-receipt-desktop.png)
+
+![GRAM phone original receipt preserving the same saved identity, quantities, price and UTC timestamp](docs/screenshots/receipt-search-original-receipt-phone.png)
+
+</details>
+
+<details>
+<summary>Review the selected original receipt before a full refund</summary>
+
+The existing refund workflow still targets exactly **DEMO-00000112 · $8.50**. Review is not confirmation: Edit and Cancel remain separate from Confirm. The browser scenario verifies cancellation writes nothing, then confirms the refund against that sale ID without changing either original receipt.
+
+![GRAM desktop full-refund review preserving the searched receipt number and exact original 8.50 amount](docs/screenshots/receipt-search-refund-review-desktop.png)
+
+![GRAM phone full-refund review with exact receipt identity and separate confirm, edit and cancel actions](docs/screenshots/receipt-search-refund-review-phone.png)
+
+</details>
 
 ## Record cash added or removed (milestone 10)
 
