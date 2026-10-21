@@ -1,3 +1,43 @@
+# Milestone 11 validation
+
+Version **0.11.0** was implemented from merged main `439f19a94bdf063489994abf262dd6310fc2e32b`. The corrected feature source is commit **`8785d0c77ef9c6652c3f17367f37fc6bb6e0463f`**, tree `321422090d094c5665ad00a613c711a4e60650ae`. This evidence update changes documentation and adds original screenshots only; service commands, database/backup schema, pricing and receipt snapshots are unchanged.
+
+## Scope and local checks
+
+Sales history provides literal, case-insensitive receipt-number/sale-ID substring search over all local saved summaries, preserving leading zeroes and exact long identifiers. It includes match counts, clear/no-match states and store-timezone timestamps on desktop/phone. Pending receipt responses cannot reopen after a newer query, refresh or navigation. The selected original receipt and existing refund workflow keep the exact sale identity.
+
+- Local `npm test`: **137 passed**, including six focused history tests.
+- Local `npm run typecheck` and `npm run build`: **passed**.
+- Independent focused code review: no actionable findings; six focused history tests independently rerun. This review was not browser execution.
+- All **53 browser scenarios** discovered locally; the new specification also passed standalone strict TypeScript checking. Discovery alone was not treated as execution.
+- Local Rust, native and browser execution were unavailable because the restored workspace had no Rust toolchain and the official toolchain download was blocked. The CI results below provide separate runtime evidence; no alternate download route was used.
+
+The initial source `579831a` passed Linux/frontend and browser checks but failed the Windows frontend build: `History.tsx` and `history.ts` created a case-insensitive module-resolution ambiguity. The helper was renamed to `historySearch.ts`, with only its two imports changed. The corrected tracked file set was checked for case-folded path and TypeScript module-stem collisions; none remain. Local 137 tests/typecheck/build passed again. Initial-head results are not claimed as a complete Windows pass.
+
+## Corrected-source CI evidence (2026-10-21)
+
+- [Register workflow](https://github.com/LJrobinson/GRAM-POS/actions/runs/39593291516): frontend typecheck, **137 frontend tests** and production build passed. Local service formatting, strict clippy and tests passed on Linux and Windows.
+- [Rust core workflow](https://github.com/LJrobinson/GRAM-POS/actions/runs/39593301414): Linux, Windows, macOS, minimum supported Rust and WebAssembly checks passed.
+- [Real Rust browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39593291516/job/119199966123): **53 passed**, including **6 new receipt-search scenarios**, with no retry configured. The [PR-triggered browser job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39593301453/job/119200550772) also passed on the corrected source.
+- [Unsigned Windows development package job](https://github.com/LJrobinson/GRAM-POS/actions/runs/39593291516/job/119199966414): native formatting, strict clippy and **14 native tests passed**; unsigned **0.11.0 NSIS installer** with offline WebView2 built and uploaded successfully as artifact `12343166468`. This is a build artifact, not a signed release or native-device runtime certification.
+
+The six new browser scenarios verify an older receipt remains searchable behind 101 newer real sales; case-insensitive literal queries, counts, clear/no-match and read-only records; desktop/390-pixel phone layouts; Tokyo history timestamps while the browser uses Honolulu; original UTC receipt, names and prices after later settings/catalog edits; correct full-refund identity including cancel-before-confirm; refresh retaining a query and including new sales; navigation/reload resetting only transient search; and delayed real receipt responses ignored after query, refresh or navigation changes. No fabricated backend response is used for these assertions.
+
+## Original screenshot evidence
+
+All eight milestone-11 README PNGs are unmodified files from artifact **`12343725191`**, `gram-pos-register-browser-review`, in the passing browser run above. Downloaded archive SHA-256: `a2b4c677b4f4ff36fb5bf207ea30cf2c3b46dfcea2126e8cc282f1f4f63dfb75`, matching GitHub's artifact digest. Each committed PNG was compared byte-for-byte with its source archive entry.
+
+Files under `docs/screenshots/`:
+
+- `receipt-search-match-desktop.png` and `receipt-search-match-phone.png`.
+- `receipt-search-no-match-desktop.png` and `receipt-search-no-match-phone.png`.
+- `receipt-search-original-receipt-desktop.png` and `receipt-search-original-receipt-phone.png`.
+- `receipt-search-refund-review-desktop.png` and `receipt-search-refund-review-phone.png`.
+
+All images were visually inspected. Desktop captures are **1440 × 1000**, phone captures **390 × 844**. Search/count/timezone and no-match recovery actions remain readable without sideways page scrolling. Receipt captures are viewport views, not full-modal images; remaining controls require ordinary vertical scrolling, particularly on the phone. Refund-review captures show exact receipt `DEMO-00000112`, $8.50 and distinct Confirm/Edit/Cancel actions. The synthetic training fixtures contain no real customer information or live money movement.
+
+These are browser viewport and automated native-build checks, not physical-phone, Windows WebView2 runtime, printer, scanner, scale or cash-drawer certification. No license was selected, production release made, or inventory/tax/compliance scope added.
+
 # Milestone 10 validation
 
 Implemented from merged main `6407721177674a16c155e4c3ad91b1ebc5a54d0a` on 2026-10-19. Before editing, all **142 tracked local blobs**, including binary assets, matched remote tree `f3bd0ba072f26afcfe34b50403f47462a6e2e297`; an immutable baseline was retained. App version is **0.10.0**, SQLite/portable backup version is **4**, and separate sales JSON is version **3**. Legacy backup v1/v2/v3 recovery and historical receipt/request/session bytes remain supported. Pricing/config schemas are unchanged.

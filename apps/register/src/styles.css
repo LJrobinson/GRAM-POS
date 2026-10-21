@@ -65,3 +65,23 @@
 
 /* Drawer movements are clearly separated from sales and remain readable at the counter. */
 .cash-page .settings-card > p{font-size:12px;line-height:1.8;margin:12px 0;overflow-wrap:anywhere}.cash-page > h2{font-size:21px;margin:30px 0 14px}.cash-session-actions{display:flex;gap:10px;flex-wrap:wrap}.cash-session-actions .primary{margin-left:auto}.cash-accounting-note,.cash-section-note{font-size:12px;line-height:1.8;color:#70806a;margin:12px 0 20px}.cash-expected-total{padding-top:14px;border-top:1px solid #dce5d7;font-weight:700}.cash-movement{border-left:4px solid #64875b}.cash-movement.paid_out{border-left-color:#a78960}.cash-movement-heading{display:flex;justify-content:space-between;gap:16px;font-size:17px}.cash-movement-heading>strong:last-child{font-variant-numeric:tabular-nums;white-space:nowrap}.cash-movement-reason,.cash-recovery-identity,.cash-review{overflow-wrap:anywhere}.cash-movement-meta{margin:15px 0;font-size:11px;line-height:1.7;overflow-wrap:anywhere}.cash-movement-meta>div{display:flex;gap:10px}.cash-movement-meta dt{min-width:80px;color:#788a70}.cash-movement-meta dd{margin:0}.cash-movement small{font-size:10px;color:#7d8b76}.cash-movement-preview{background:#f0f5ed;border:1px solid #dbe5d4;border-radius:8px;padding:15px;margin:18px 0}.cash-movement-preview>div{display:flex;justify-content:space-between;gap:12px;font-size:12px;line-height:1.8}.cash-movement-preview>div+div{margin-top:8px}.cash-movement-preview p{font-size:10px;line-height:1.7;color:#74846c;margin-top:12px}.ledger-form>p:not(.warning-banner),.ledger-form>h3{margin:14px 0;line-height:1.7;font-size:13px}.cash-review>p{margin-top:9px}.ledger-form>.field-label{margin-top:15px}.cash-recovery-identity{font-size:11px!important;color:#788570}.cash-page time{font-variant-numeric:tabular-nums}@media(max-width:600px){.cash-session-actions .primary{margin-left:0;width:100%}.cash-session-actions .secondary{flex:1}.cash-movement-meta>div{display:block;margin-top:9px}.cash-movement-heading{font-size:16px}.cash-movement-preview>div{flex-wrap:wrap}.cash-movement-preview>div>strong{margin-left:auto}.cash-page .ledger-totals{font-size:12px}}
+
+/* Receipt history keeps identifiers and explicit timezone readable at every width. */
+.history-search { margin-bottom: 22px; }
+.history-search-controls { display: flex; gap: 10px; }
+.history-search-controls .search-field { flex: 1; min-width: 0; }
+.history-search-controls input { min-width: 0; width: 100%; }
+.history-zone, .history-count { font-size: 11px; line-height: 1.7; color: #52634a; overflow-wrap: anywhere; }
+.history-count { margin-bottom: 12px; }
+.history-page .sale-row > * { min-width: 0; overflow-wrap: anywhere; }
+.history-page .history-empty .secondary { margin-top: 20px; }
+@media (max-width: 740px) {
+  .history-search-controls { flex-direction: column; }
+  .history-search-controls .search-field { flex: auto; }
+  .history-search-controls .secondary { align-self: flex-start; }
+  .history-page .sale-row { grid-template-columns: minmax(0, 1fr) auto 16px; }
+  .history-page .sale-row > span:first-child { grid-column: 1; grid-row: 1; }
+  .history-page .sale-row > strong { grid-column: 2; grid-row: 1; }
+  .history-page .sale-row > svg { grid-column: 3; grid-row: 1; }
+  .history-page .sale-row > .history-time { display: block; grid-column: 1 / -1; grid-row: 2; font-size: 10px; line-height: 1.7; }
+}
