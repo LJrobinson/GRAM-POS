@@ -1,3 +1,17 @@
+# Milestone 11 local verification (2026-10-21)
+
+Source baseline: merged main `439f19a94bdf063489994abf262dd6310fc2e32b`, tree `95eaeac8079c5a7d21e0109cd23743add3efdf93`. Restored into a separate work folder without overwriting the older export; all baseline files were checked against Git blob hashes.
+
+- `npm test`: **137 passed**, including six focused history search/timezone/request-guard tests.
+- `npm run typecheck`: **passed**.
+- `npm run build`: **passed**.
+- Independent focused review: no actionable findings in search semantics, exact receipt identity, request invalidation or phone timestamp CSS; six focused history tests rerun successfully. This was code review, not browser execution.
+- Local Rust/service/native and real-browser E2E: **not run**. No Rust toolchain survived the workspace restore; official Rust download was policy-blocked. No mirror or bypass was attempted. Existing GitHub workflows must verify the exact published commit before this increment is called ready.
+- New browser specification: **6 scenarios discovered** and standalone strict TypeScript check passed (discovery is not execution). Covers an older receipt beyond 100 newer real sales, desktop/phone search and read-only records, receipt/refund identity after catalog changes, refresh/reload, and delayed-response cancellation.
+- Browser screenshot capture is included in the new scenarios; no new milestone-11 screenshot or browser-pass claim is made before that run completes.
+
+The feature is read-only and uses unchanged service commands/schema. Existing prior milestone evidence below is historical and does not prove this increment passed.
+
 # Milestone 10 validation
 
 Implemented from merged main `6407721177674a16c155e4c3ad91b1ebc5a54d0a` on 2026-10-19. Before editing, all **142 tracked local blobs**, including binary assets, matched remote tree `f3bd0ba072f26afcfe34b50403f47462a6e2e297`; an immutable baseline was retained. App version is **0.10.0**, SQLite/portable backup version is **4**, and separate sales JSON is version **3**. Legacy backup v1/v2/v3 recovery and historical receipt/request/session bytes remain supported. Pricing/config schemas are unchanged.

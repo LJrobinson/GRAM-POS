@@ -32,3 +32,16 @@ Fields are quoted and embedded quotes/newlines escaped. Potential spreadsheet fo
 Native exports use the OS destination picker and refuse to replace an existing file, even when the dialog offers overwrite. Canceling the picker saves nothing. Browser exports use the browser download workflow. Files are unencrypted and should be kept private.
 
 CSV and sales JSON reports cannot restore your register. Continue using the portable backup and the unchanged [offline recovery procedure](backup.md), which restores to a new database file and never overwrites the live store.
+
+
+## Find a saved receipt (0.11.0)
+
+Sales history searches every sale returned by the local store, not just a recent page. Enter a whole or partial receipt number or sale ID. Matching is case-insensitive, trims surrounding whitespace, and treats punctuation literally, not as a pattern. Identifiers are never converted to numbers; leading zeroes and long IDs remain exact. Product names, prices and dates are not searched.
+
+The matching count distinguishes no matches from an empty store. Clear search or Show all saved sales restores the complete list. Refresh keeps the typed query and reloads the local record. Leaving Sales history or restarting the app resets this temporary search; it does not alter a saved sale or draft.
+
+Each row shows the sale ID and the timestamp in the current configured store timezone, including on phone-sized layouts. Times include the year and UTC offset where applicable, so repeated daylight-saving hours can be distinguished. A browser unable to render that timezone visibly falls back to UTC. Original receipt previews and printouts continue to use the immutable receipt snapshot, including its saved timezone, not the current history display setting.
+
+Opening a result requests that row's exact sale ID. Changing the query, refreshing, or leaving history cancels publication of any pending receipt response; it cannot open over a newer view. Refund availability still comes from the cash ledger and selected original receipt. Searching does not write to the ledger, change refund state, reserve stock, or modify receipts.
+
+All summaries are loaded in memory by the existing service API; this increment adds no server pagination or performance guarantee for very large histories.

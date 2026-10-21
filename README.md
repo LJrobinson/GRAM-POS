@@ -4,6 +4,14 @@
 
 Repository: https://github.com/LJrobinson/GRAM-POS.
 
+## Find a saved receipt (milestone 11)
+
+Version **0.11.0** adds a read-only search to Sales history. Find any saved sale on this device by its full or partial receipt number or sale ID, with case-insensitive literal matching, a matching count, and a clear-search action. Leading zeroes and long identifiers stay text; product names, amounts and dates are not search fields. Refresh reloads all saved sales while preserving the search.
+
+History timestamps explicitly use the configured **store timezone**, including on narrow screens. Opening a result still reads the same immutable receipt; its original saved timezone and details do not change. A pending receipt response is ignored after a newer search, refresh or navigation. This adds no database migration, transaction type, stock behavior or production/compliance claim. See [receipts and reports](docs/receipts-and-reports.md) for details.
+
+Milestone-11 real-service browser verification and new screenshots are pending; the earlier verified captures below keep their original milestone labels. See [validation status](VALIDATION.md).
+
 ## Record cash added or removed (milestone 10)
 
 Version **0.10.0** adds explicit **Paid in** and **Paid out** records for an open cash session. Enter an exact positive amount and required nonpersonal reason, review the details, then confirm. Cancel writes nothing. Each committed adjustment is an immutable record with its own identity and retry key, not a sale, refund, receipt, tax or inventory event.
